@@ -227,4 +227,8 @@ def main():
     if now.hour == HEARTBEAT_UTC_HOUR and now.minute < HEARTBEAT_WINDOW_MIN:
         send_telegram("✅ *Daily heartbeat — bot is alive*\n\n" +
                       "\n".join(statuses) +
-                      f"\n\n
+                      f"\n\n_{now.strftime('%a %d %b, %H:%M')} UTC · 15min · two-stage signals_")
+
+
+if __name__ == "__main__":
+    main()
