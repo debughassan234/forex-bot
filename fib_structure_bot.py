@@ -1,11 +1,14 @@
 """
-Fib Structure Bot v5.1 — XAU/USD, GBP/USD, EUR/USD on 15min
-TWO-STAGE SIGNALS for fast entries:
-  Stage 1  ⚡ BOS heads-up  — structure just broke (continuation or CHoCH);
-           fib zone drawn; get to your chart.
-  Stage 2  🟢/🔴 ENTER NOW — price retraced into the 0.382-0.618 zone AND a
-           confirmation candle (engulfing/pin bar) closed. Enter immediately.
-SL beyond the 1.0 | TP1 -0.382 | TP2 -0.618. Heartbeat ~8am WAT.
+Fib Structure Bot v6.1 — MULTI-TIMEFRAME (Daily -> 4H -> 1H)
+XAU/USD, EUR/USD, USD/JPY
+
+  DAILY  -> direction allowed. Ranging daily = no trades on that symbol.
+  4H     -> where: significant impulse leg, fib drawn, 0.382-0.618 golden zone.
+  1H     -> evidence: swing break (primary) or engulfing/pin bar in the zone.
+
+Fib settings unchanged: zone 0.382-0.618, SL beyond 1.0 + buffer,
+TP1 -0.382 extension, TP2 -0.618 extension.
+Every signal carries the exact lot size for a fixed % risk.
 """
 
 import os
@@ -17,50 +20,58 @@ TWELVE_DATA_API_KEY = os.environ["TWELVE_DATA_API_KEY"]
 TELEGRAM_BOT_TOKEN  = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID    = os.environ["TELEGRAM_CHAT_ID"]
 
-SYMBOLS    = ["XAU/USD", "GBP/USD", "EUR/USD"]
-TIMEFRAMES = ["15min"]
-CANDLES    = 150
-PIVOT_N    = 3
-ZONE_LOW   = 0.382
-ZONE_HIGH  = 0.618
-SL_BUFFER  = 0.10
-TP1_EXT    = 0.382
-TP2_EXT    = 0.618
+SYMBOLS   = ["XAU/USD", "EUR/USD", "USD/JPY"]
 
-BOS_FRESH_CANDLES  = 2    # BOS alert only if the break happened in the last 2 candles
-MAX_CANDLE_AGE_MIN = 6    # entry signal only right after the confirming candle closes
+TF_BIAS   = "1day"
+TF_ZONE   = "4h"
+TF_ENTRY  = "1h"
+
+N_BIAS, N_ZONE, N_ENTRY = 120, 180, 180
+PIVOT_BIAS, PIVOT_ZONE, PIVOT_ENTRY = 3, 3, 2
+
+ZONE_LOW    = 0.382
+ZONE_HIGH   = 0.618
+ZONE_PRIME  = 0.5
+SL_BUFFER   = 0.10
+TP1_EXT     = 0.382
+TP2_EXT     = 0.618
+
+MIN_LEG_ATR    = 1.5
+ZONE_LOOKBACK  = 12
+ENTRY_MAX_AGE  = 25
+
+# ------- risk / position sizing (edit these to match your account) -------
+ACCOUNT_SIZE   = 100000.0
+RISK_PERCENT   = 0.5
+DAILY_LOSS_CAP = 5.0
+MAX_LOTS       = 5.0
+
+CONTRACT   = {"XAU/USD": 100.0, "EUR/USD": 100000.0, "USD/JPY": 100000.0}
+JPY_QUOTED = {"USD/JPY"}
+PIP        = {"EUR/USD": 0.0001, "USD/JPY": 0.01}
 
 HEARTBEAT_UTC_HOUR   = 7
-HEARTBEAT_WINDOW_MIN = 20
+HEARTBEAT_WINDOW_MIN = 25
 
 
-def get_candles(symbol, interval):
+def get_candles(symbol, interval, size):
     url = (f"https://api.twelvedata.com/time_series?symbol={symbol}"
-           f"&interval={interval}&outputsize={CANDLES}&apikey={TWELVE_DATA_API_KEY}")
-    data = requests.get(url, timeout=20).json()
+           f"&interval={interval}&outputsize={size}&apikey={TWELVE_DATA_API_KEY}")
+    data = requests.get(url, timeout=25).json()
     try:
         vals = data["values"]
         vals.reverse()
         return [{"t": v["datetime"], "o": float(v["open"]), "h": float(v["high"]),
                  "l": float(v["low"]), "c": float(v["close"])} for v in vals]
     except (KeyError, TypeError):
-        print(f"[warn] fetch failed {symbol} {interval}: {data.get('message', data)}")
+        print(f"[warn] {symbol} {interval}: {data.get('message', data)}")
         return None
 
 
-def latest_candle_age_minutes(candles):
-    try:
-        t = datetime.strptime(candles[-1]["t"], "%Y-%m-%d %H:%M:%S")
-        t = t.replace(tzinfo=timezone.utc)
-        return (datetime.now(timezone.utc) - t).total_seconds() / 60.0
-    except Exception:
-        return 0.0
-
-
-def find_swings(candles):
+def find_swings(candles, pivot):
     highs, lows = [], []
-    for i in range(PIVOT_N, len(candles) - PIVOT_N):
-        w = candles[i - PIVOT_N: i + PIVOT_N + 1]
+    for i in range(pivot, len(candles) - pivot):
+        w = candles[i - pivot: i + pivot + 1]
         if candles[i]["h"] == max(c["h"] for c in w):
             highs.append((i, candles[i]["h"]))
         if candles[i]["l"] == min(c["l"] for c in w):
@@ -68,166 +79,298 @@ def find_swings(candles):
     return highs, lows
 
 
-def fmt(s, x):
-    return f"{x:.2f}" if "XAU" in s else f"{x:.5f}"
+def atr(candles, period=14):
+    trs = []
+    for i in range(1, len(candles)):
+        p, c = candles[i - 1], candles[i]
+        trs.append(max(c["h"] - c["l"], abs(c["h"] - p["c"]), abs(c["l"] - p["c"])))
+    if not trs:
+        return 0.0
+    return sum(trs[-period:]) / min(period, len(trs))
 
 
-def dist_label(s, d):
-    return f"${d:.2f}" if "XAU" in s else f"{d / 0.0001:.0f} pips"
+def fmt(sym, x):
+    if "XAU" in sym:
+        return f"{x:,.2f}"
+    if sym in JPY_QUOTED:
+        return f"{x:.3f}"
+    return f"{x:.5f}"
+
+
+def dist_label(sym, d):
+    if "XAU" in sym:
+        return f"${d:,.2f}"
+    return f"{d / PIP.get(sym, 0.0001):.0f} pips"
+
+
+def candle_age_minutes(candles):
+    try:
+        t = datetime.strptime(candles[-1]["t"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - t).total_seconds() / 60.0
+    except Exception:
+        return 0.0
 
 
 def send_telegram(msg):
-    requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                  json={"chat_id": TELEGRAM_CHAT_ID, "text": msg,
-                        "parse_mode": "Markdown"}, timeout=15)
+    try:
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                      json={"chat_id": TELEGRAM_CHAT_ID, "text": msg,
+                            "parse_mode": "Markdown"}, timeout=20)
+    except Exception as e:
+        print(f"[warn] telegram send failed: {e}")
 
 
-def confirmation(a, b, direction):
-    body = abs(b["c"] - b["o"])
-    rng  = b["h"] - b["l"]
-    if rng == 0:
+def lot_size(symbol, sl_distance, price):
+    """Lots such that a full stop-out loses exactly RISK_PERCENT of the account."""
+    if sl_distance <= 0 or price <= 0:
+        return 0.0, 0.0
+    risk_usd = ACCOUNT_SIZE * (RISK_PERCENT / 100.0)
+    per_lot_loss = sl_distance * CONTRACT.get(symbol, 100000.0)
+    if symbol in JPY_QUOTED:
+        per_lot_loss = per_lot_loss / price          # JPY -> USD
+    if per_lot_loss <= 0:
+        return 0.0, risk_usd
+    return min(round(risk_usd / per_lot_loss, 2), MAX_LOTS), risk_usd
+
+
+def daily_bias(candles):
+    highs, lows = find_swings(candles, PIVOT_BIAS)
+    if len(highs) < 2 or len(lows) < 2:
         return None
-    upper = b["h"] - max(b["c"], b["o"])
-    lower = min(b["c"], b["o"]) - b["l"]
-    if direction == "bull":
-        if b["c"] > b["o"] and a["c"] < a["o"] and b["c"] > a["o"] and b["o"] < a["c"]:
-            return "bullish engulfing"
-        if lower > 2 * body and lower > 0.5 * rng:
-            return "bullish pin bar"
-    else:
-        if b["c"] < b["o"] and a["c"] > a["o"] and b["c"] < a["o"] and b["o"] > a["c"]:
-            return "bearish engulfing"
-        if upper > 2 * body and upper > 0.5 * rng:
-            return "bearish pin bar"
+    h1, h2 = highs[-2][1], highs[-1][1]
+    l1, l2 = lows[-2][1],  lows[-1][1]
+    if h2 > h1 and l2 > l1:
+        return "bullish"
+    if h2 < h1 and l2 < l1:
+        return "bearish"
     return None
 
 
-def first_close_beyond(candles, level, direction, start):
-    for i in range(start, len(candles)):
-        if direction == "up" and candles[i]["c"] > level:
-            return i
-        if direction == "down" and candles[i]["c"] < level:
-            return i
-    return None
+def four_hour_zone(candles, bias):
+    highs, lows = find_swings(candles, PIVOT_ZONE)
+    if len(highs) < 2 or len(lows) < 2:
+        return None
 
+    a = atr(candles)
+    if a <= 0:
+        return None
 
-def process(symbol, interval, direction, leg_hi, leg_lo, candles, kind, bos_i):
-    leg = leg_hi - leg_lo
-    if leg <= 0:
-        return ""
-    if direction == "buy":
-        z_top = leg_hi - ZONE_LOW  * leg
-        z_bot = leg_hi - ZONE_HIGH * leg
+    if bias == "bullish":
+        leg_lo_i, leg_lo = lows[-1]
+        after = candles[leg_lo_i:]
+        if not after:
+            return None
+        leg_hi = max(c["h"] for c in after)
+        leg = leg_hi - leg_lo
+        if leg < MIN_LEG_ATR * a:
+            return None
+        z_top = leg_hi - ZONE_LOW   * leg
+        z_bot = leg_hi - ZONE_HIGH  * leg
+        z_prime = leg_hi - ZONE_PRIME * leg
         sl  = leg_lo - SL_BUFFER * leg
         tp1 = leg_hi + TP1_EXT * leg
         tp2 = leg_hi + TP2_EXT * leg
-        want, side, emoji, arrow = "bull", "BUY", "🟢", "UP"
+        prior = [p for _, p in highs[:-1] + lows[:-1]]
     else:
-        z_bot = leg_lo + ZONE_LOW  * leg
-        z_top = leg_lo + ZONE_HIGH * leg
+        leg_hi_i, leg_hi = highs[-1]
+        after = candles[leg_hi_i:]
+        if not after:
+            return None
+        leg_lo = min(c["l"] for c in after)
+        leg = leg_hi - leg_lo
+        if leg < MIN_LEG_ATR * a:
+            return None
+        z_bot = leg_lo + ZONE_LOW   * leg
+        z_top = leg_lo + ZONE_HIGH  * leg
+        z_prime = leg_lo + ZONE_PRIME * leg
         sl  = leg_hi + SL_BUFFER * leg
         tp1 = leg_lo - TP1_EXT * leg
         tp2 = leg_lo - TP2_EXT * leg
-        want, side, emoji, arrow = "bear", "SELL", "🔴", "DOWN"
+        prior = [p for _, p in highs[:-1] + lows[:-1]]
 
-    label = "TREND CHANGE (CHoCH)" if "reversal" in kind else "trend continuation"
-    last_i = len(candles) - 1
-    price  = candles[-1]["c"]
-
-    # -------- Stage 1: fresh BOS heads-up --------
-    if bos_i is not None and bos_i >= last_i - BOS_FRESH_CANDLES + 1:
-        send_telegram(
-            f"⚡ *BOS {arrow} — {symbol} ({interval})* — {label}\n\n"
-            f"Fib leg `{fmt(symbol, leg_lo if direction=='buy' else leg_hi)}` → "
-            f"`{fmt(symbol, leg_hi if direction=='buy' else leg_lo)}`\n"
-            f"🎯 Golden zone: `{fmt(symbol, z_bot)}` – `{fmt(symbol, z_top)}`\n"
-            f"Planned SL `{fmt(symbol, sl)}` | TP1 `{fmt(symbol, tp1)}` | TP2 `{fmt(symbol, tp2)}`\n\n"
-            f"_Get ready — waiting for retrace + confirmation candle._"
-        )
-
-    # -------- Stage 2: confirmed entry --------
-    b, a = candles[-2], candles[-3]
-    conf = confirmation(a, b, want)
-    touched_zone = (b["l"] <= z_top and b["h"] >= z_bot)
-    fresh = latest_candle_age_minutes(candles) <= MAX_CANDLE_AGE_MIN
-
-    if conf and touched_zone and fresh:
-        send_telegram(
-            f"{emoji} *{side} NOW — {symbol} ({interval})* — {label}\n\n"
-            f"Retrace into `{fmt(symbol, z_bot)}`–`{fmt(symbol, z_top)}` "
-            f"CONFIRMED by *{conf}*\n"
-            f"Current price: `{fmt(symbol, price)}`\n\n"
-            f"Stop Loss: `{fmt(symbol, sl)}`  ({dist_label(symbol, abs(price - sl))})\n"
-            f"TP1 (-0.382): `{fmt(symbol, tp1)}`  ({dist_label(symbol, abs(tp1 - price))})\n"
-            f"TP2 (-0.618): `{fmt(symbol, tp2)}`  ({dist_label(symbol, abs(tp2 - price))})\n\n"
-            f"_Rule-based signal — glance at your chart, manage risk. Not financial advice._"
-        )
-        return f"{emoji}{side} CONFIRMED"
-    if touched_zone:
-        return "in zone, awaiting confirmation"
-    return "zone set, awaiting retrace"
+    confluence = any(z_bot <= p <= z_top for p in prior)
+    return {"leg": leg, "leg_hi": leg_hi, "leg_lo": leg_lo,
+            "z_bot": z_bot, "z_top": z_top, "z_prime": z_prime,
+            "sl": sl, "tp1": tp1, "tp2": tp2,
+            "confluence": confluence, "atr": a}
 
 
-def analyze(symbol, interval):
-    candles = get_candles(symbol, interval)
-    if not candles or len(candles) < 40:
-        return f"{symbol} {interval}: data unavailable"
+def one_hour_trigger(symbol, candles, zone, bias):
+    z_bot, z_top = zone["z_bot"], zone["z_top"]
 
-    highs, lows = find_swings(candles)
-    if len(highs) < 2 or len(lows) < 2:
-        return f"{symbol} {interval}: not enough swings"
+    recent = candles[-ZONE_LOOKBACK:]
+    touched = any(c["l"] <= z_top and c["h"] >= z_bot for c in recent)
+    if not touched:
+        return None, None
 
-    (h1_i, h1), (h2_i, h2) = highs[-2], highs[-1]
-    (l1_i, l1), (l2_i, l2) = lows[-2],  lows[-1]
-    price = candles[-1]["c"]
+    highs, lows = find_swings(candles, PIVOT_ENTRY)
+    last = candles[-2]
+    prev = candles[-3]
 
-    status, note = "ranging", ""
+    if bias == "bullish" and highs:
+        sh_i, sh = highs[-1]
+        if last["c"] > sh and sh_i >= len(candles) - ZONE_LOOKBACK:
+            return f"1H broke its last swing high {fmt(symbol, sh)}", "structure"
+    if bias == "bearish" and lows:
+        sl_i, sl_v = lows[-1]
+        if last["c"] < sl_v and sl_i >= len(candles) - ZONE_LOOKBACK:
+            return f"1H broke its last swing low {fmt(symbol, sl_v)}", "structure"
 
-    if h2 > h1 and l2 > l1:
-        status = "uptrend"
-        rev_i = first_close_beyond(candles, l2, "down", l2_i + 1)
-        if rev_i is not None:
-            new_low = min(c["l"] for c in candles[h2_i:])
-            note = process(symbol, interval, "sell", h2, new_low, candles, "reversal-down", rev_i)
-        else:
-            cont_i = first_close_beyond(candles, h1, "up", h1_i + 1)
-            if cont_i is not None:
-                leg_hi = max(c["h"] for c in candles[l2_i:])
-                note = process(symbol, interval, "buy", leg_hi, l2, candles, "continuation-up", cont_i)
+    in_zone = last["l"] <= z_top and last["h"] >= z_bot
+    if in_zone:
+        body = abs(last["c"] - last["o"])
+        rng  = last["h"] - last["l"]
+        if rng > 0:
+            upper = last["h"] - max(last["c"], last["o"])
+            lower = min(last["c"], last["o"]) - last["l"]
+            if bias == "bullish":
+                if (last["c"] > last["o"] and prev["c"] < prev["o"]
+                        and last["c"] > prev["o"] and last["o"] < prev["c"]):
+                    return "bullish engulfing in the zone", "candle"
+                if lower > 2 * body and lower > 0.5 * rng:
+                    return "bullish pin bar (rejection wick) in the zone", "candle"
+            else:
+                if (last["c"] < last["o"] and prev["c"] > prev["o"]
+                        and last["c"] < prev["o"] and last["o"] > prev["c"]):
+                    return "bearish engulfing in the zone", "candle"
+                if upper > 2 * body and upper > 0.5 * rng:
+                    return "bearish pin bar (rejection wick) in the zone", "candle"
+    return None, None
 
-    elif h2 < h1 and l2 < l1:
-        status = "downtrend"
-        rev_i = first_close_beyond(candles, h2, "up", h2_i + 1)
-        if rev_i is not None:
-            new_high = max(c["h"] for c in candles[l2_i:])
-            note = process(symbol, interval, "buy", new_high, l2, candles, "reversal-up", rev_i)
-        else:
-            cont_i = first_close_beyond(candles, l1, "down", l1_i + 1)
-            if cont_i is not None:
-                leg_lo = min(c["l"] for c in candles[h2_i:])
-                note = process(symbol, interval, "sell", h2, leg_lo, candles, "continuation-down", cont_i)
 
-    line = f"{symbol} {interval}: {fmt(symbol, price)} — {status}" + (f" | {note}" if note else "")
-    print(line)
-    return line
+def entry_message(symbol, bias, zone, trigger, quality, price):
+    side, emoji = ("BUY", "🟢") if bias == "bullish" else ("SELL", "🔴")
+    sl, tp1, tp2 = zone["sl"], zone["tp1"], zone["tp2"]
+    risk = abs(price - sl)
+    rr1 = abs(tp1 - price) / risk if risk else 0
+    rr2 = abs(tp2 - price) / risk if risk else 0
+    lots, risk_usd = lot_size(symbol, risk, price)
+    losses_to_cap = int(DAILY_LOSS_CAP / RISK_PERCENT) if RISK_PERCENT else 0
+
+    deep = (price <= zone["z_prime"]) if bias == "bullish" else (price >= zone["z_prime"])
+    grade = []
+    grade.append("deep zone (0.5-0.618) OK" if deep else "shallow zone (0.382-0.5) !")
+    grade.append("4H confluence OK" if zone["confluence"] else "no prior-level confluence !")
+    grade.append("1H structure break OK" if quality == "structure" else "candle confirmation only !")
+
+    return (
+        f"{emoji} *{side} — {symbol}*\n"
+        f"_Daily {bias} → 4H zone → 1H evidence_\n\n"
+        f"Entry (market): `{fmt(symbol, price)}`\n"
+        f"Stop Loss: `{fmt(symbol, sl)}`  ({dist_label(symbol, risk)})\n"
+        f"TP1 (-0.382): `{fmt(symbol, tp1)}`  — RR {rr1:.2f}:1\n"
+        f"TP2 (-0.618): `{fmt(symbol, tp2)}`  — RR {rr2:.2f}:1\n\n"
+        f"📐 *Lot size: {lots:.2f}*  (risking {RISK_PERCENT}% = ${risk_usd:,.0f})\n"
+        f"{losses_to_cap} straight losses to reach the {DAILY_LOSS_CAP}% daily cap\n\n"
+        f"4H golden zone: `{fmt(symbol, zone['z_bot'])}` – `{fmt(symbol, zone['z_top'])}`\n"
+        f"Trigger: {trigger}\n"
+        f"Setup grade: " + " | ".join(grade) + "\n\n"
+        f"_Check the chart before entering. Not financial advice._"
+    )
+
+
+def armed_message(symbol, bias, zone, price):
+    side = "LONG" if bias == "bullish" else "SHORT"
+    return (
+        f"⚡ *ZONE ARMED — {symbol}* ({side} setup building)\n\n"
+        f"Daily bias: *{bias}* · 4H impulse leg "
+        f"`{fmt(symbol, zone['leg_lo'])}` → `{fmt(symbol, zone['leg_hi'])}`\n"
+        f"🎯 Golden zone: `{fmt(symbol, zone['z_bot'])}` – `{fmt(symbol, zone['z_top'])}`\n"
+        f"Price now: `{fmt(symbol, price)}`\n"
+        f"Confluence: {'prior 4H level in zone OK' if zone['confluence'] else 'none'}\n\n"
+        f"Planned SL `{fmt(symbol, zone['sl'])}` | TP1 `{fmt(symbol, zone['tp1'])}` | "
+        f"TP2 `{fmt(symbol, zone['tp2'])}`\n\n"
+        f"_Now waiting for 1H evidence (swing break or confirmation candle)._"
+    )
+
+
+def analyze(symbol):
+    d = get_candles(symbol, TF_BIAS, N_BIAS)
+    time.sleep(8)
+    if not d or len(d) < 30:
+        return f"{symbol}: daily data unavailable", None
+
+    bias = daily_bias(d)
+    if bias is None:
+        return f"{symbol}: daily ranging — standing aside", None
+
+    h4 = get_candles(symbol, TF_ZONE, N_ZONE)
+    time.sleep(8)
+    if not h4 or len(h4) < 40:
+        return f"{symbol}: 4H data unavailable", None
+
+    h4_bias = daily_bias(h4)
+    if h4_bias != bias:
+        return f"{symbol}: daily {bias}, 4H not aligned — no trade", None
+
+    zone = four_hour_zone(h4, bias)
+    if zone is None:
+        return f"{symbol}: daily {bias}, no significant 4H leg yet", None
+
+    h1 = get_candles(symbol, TF_ENTRY, N_ENTRY)
+    time.sleep(8)
+    if not h1 or len(h1) < 40:
+        return f"{symbol}: 1H data unavailable", None
+
+    price = h1[-1]["c"]
+    in_zone_now  = zone["z_bot"] <= price <= zone["z_top"]
+    prev_in_zone = zone["z_bot"] <= h1[-2]["c"] <= zone["z_top"]
+    fresh = candle_age_minutes(h1) <= ENTRY_MAX_AGE
+
+    trigger, quality = one_hour_trigger(symbol, h1, zone, bias)
+
+    if trigger and fresh:
+        send_telegram(entry_message(symbol, bias, zone, trigger, quality, price))
+        return (f"{symbol}: daily {bias} | 4H zone | ENTRY SENT ({quality})",
+                "long" if bias == "bullish" else "short")
+
+    if in_zone_now and not prev_in_zone:
+        send_telegram(armed_message(symbol, bias, zone, price))
+        return f"{symbol}: daily {bias} | price entered zone — awaiting 1H evidence", None
+
+    if in_zone_now:
+        return f"{symbol}: daily {bias} | in zone, no 1H evidence yet", None
+
+    return (f"{symbol}: daily {bias} | zone "
+            f"{fmt(symbol, zone['z_bot'])}-{fmt(symbol, zone['z_top'])}, awaiting retrace"), None
 
 
 def main():
-    statuses = []
+    statuses, fired = [], {}
     for s in SYMBOLS:
-        for tf in TIMEFRAMES:
-            try:
-                statuses.append(analyze(s, tf))
-            except Exception as e:
-                print(f"[error] {s} {tf}: {e}")
-                statuses.append(f"{s} {tf}: error")
-            time.sleep(8)
+        try:
+            line, direction = analyze(s)
+            if direction:
+                fired[s] = direction
+        except Exception as e:
+            line = f"{s}: error ({e})"
+            print(f"[error] {s}: {e}")
+        statuses.append(line)
+        print(line)
+
+    if "EUR/USD" in fired and "USD/JPY" in fired:
+        if fired["EUR/USD"] != fired["USD/JPY"]:
+            send_telegram(
+                "⚠️ *Correlation warning*\n\n"
+                "EUR/USD and USD/JPY signalled opposite directions — that is the same "
+                "USD bet placed twice, so your real risk is doubled.\n\n"
+                f"Take one, or halve the lot size on each to keep total risk at {RISK_PERCENT}%."
+            )
 
     now = datetime.now(timezone.utc)
+
+    if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+        send_telegram(
+            "🔎 *Manual check — current read*\n\n" + "\n".join(statuses) +
+            f"\n\n_{now.strftime('%a %d %b %H:%M')} UTC · Daily→4H→1H_"
+        )
+
     if now.hour == HEARTBEAT_UTC_HOUR and now.minute < HEARTBEAT_WINDOW_MIN:
-        send_telegram("✅ *Daily heartbeat — bot is alive*\n\n" +
-                      "\n".join(statuses) +
-                      f"\n\n_{now.strftime('%a %d %b, %H:%M')} UTC · 15min · two-stage signals_")
+        send_telegram(
+            "✅ *Daily heartbeat — bot alive*\n\n" + "\n".join(statuses) +
+            f"\n\n_{now.strftime('%a %d %b %H:%M')} UTC · Daily→4H→1H · "
+            f"risk {RISK_PERCENT}%/trade on ${ACCOUNT_SIZE:,.0f}_"
+        )
 
 
 if __name__ == "__main__":
