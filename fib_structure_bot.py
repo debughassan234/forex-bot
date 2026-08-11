@@ -1,14 +1,14 @@
 """
-Fib Structure Bot v6.1 — MULTI-TIMEFRAME (Daily -> 4H -> 1H)
-XAU/USD, EUR/USD, USD/JPY
+Fib Structure Bot v7 — MULTI-TIMEFRAME (Daily -> 4H -> 1H)
+XAU/USD, EUR/USD, USD/JPY, GBP/JPY
 
-  DAILY  -> direction allowed. Ranging daily = no trades on that symbol.
-  4H     -> where: significant impulse leg, fib drawn, 0.382-0.618 golden zone.
-  1H     -> evidence: swing break (primary) or engulfing/pin bar in the zone.
+BIAS ENGINE (three layers):
+  1. PERSISTENCE  - trend holds until price CLOSES beyond the last HL/LH
+  2. THREE-SWING  - last 3 swings aligned = graded "strong"
+  3. MA TIEBREAK  - if structure is silent, 50-MA gives a "weak" bias
 
 Fib settings unchanged: zone 0.382-0.618, SL beyond 1.0 + buffer,
 TP1 -0.382 extension, TP2 -0.618 extension.
-Every signal carries the exact lot size for a fixed % risk.
 """
 
 import os
@@ -20,7 +20,7 @@ TWELVE_DATA_API_KEY = os.environ["TWELVE_DATA_API_KEY"]
 TELEGRAM_BOT_TOKEN  = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID    = os.environ["TELEGRAM_CHAT_ID"]
 
-SYMBOLS   = ["XAU/USD", "EUR/USD", "USD/JPY"]
+SYMBOLS   = ["XAU/USD", "EUR/USD", "USD/JPY", "GBP/JPY"]
 
 TF_BIAS   = "1day"
 TF_ZONE   = "4h"
@@ -46,9 +46,13 @@ RISK_PERCENT   = 0.5
 DAILY_LOSS_CAP = 5.0
 MAX_LOTS       = 5.0
 
-CONTRACT   = {"XAU/USD": 100.0, "EUR/USD": 100000.0, "USD/JPY": 100000.0}
-JPY_QUOTED = {"USD/JPY"}
-PIP        = {"EUR/USD": 0.0001, "USD/JPY": 0.01}
+CONTRACT   = {"XAU/USD": 100.0, "EUR/USD": 100000.0,
+              "USD/JPY": 100000.0, "GBP/JPY": 100000.0}
+JPY_QUOTED = {"USD/JPY", "GBP/JPY"}
+PIP        = {"EUR/USD": 0.0001, "USD/JPY": 0.01, "GBP/JPY": 0.01}
+MA_PERIOD  = 50
+
+USDJPY_RATE = None
 
 HEARTBEAT_UTC_HOUR   = 7
 HEARTBEAT_WINDOW_MIN = 25
@@ -121,29 +125,77 @@ def send_telegram(msg):
 
 
 def lot_size(symbol, sl_distance, price):
-    """Lots such that a full stop-out loses exactly RISK_PERCENT of the account."""
     if sl_distance <= 0 or price <= 0:
         return 0.0, 0.0
     risk_usd = ACCOUNT_SIZE * (RISK_PERCENT / 100.0)
     per_lot_loss = sl_distance * CONTRACT.get(symbol, 100000.0)
     if symbol in JPY_QUOTED:
-        per_lot_loss = per_lot_loss / price          # JPY -> USD
+        rate = price if symbol == "USD/JPY" else USDJPY_RATE
+        if not rate:
+            return 0.0, risk_usd
+        per_lot_loss = per_lot_loss / rate
     if per_lot_loss <= 0:
         return 0.0, risk_usd
     return min(round(risk_usd / per_lot_loss, 2), MAX_LOTS), risk_usd
 
 
-def daily_bias(candles):
-    highs, lows = find_swings(candles, PIVOT_BIAS)
-    if len(highs) < 2 or len(lows) < 2:
+def sma(candles, period):
+    closes = [c["c"] for c in candles]
+    if len(closes) < period:
         return None
-    h1, h2 = highs[-2][1], highs[-1][1]
-    l1, l2 = lows[-2][1],  lows[-1][1]
-    if h2 > h1 and l2 > l1:
-        return "bullish"
-    if h2 < h1 and l2 < l1:
-        return "bearish"
-    return None
+    return sum(closes[-period:]) / period
+
+
+def three_swing_aligned(highs, lows, direction):
+    if len(highs) < 3 or len(lows) < 3:
+        return False
+    h = [p for _, p in highs[-3:]]
+    l = [p for _, p in lows[-3:]]
+    if direction == "bullish":
+        return h[0] < h[1] < h[2] and l[0] < l[1] < l[2]
+    return h[0] > h[1] > h[2] and l[0] > l[1] > l[2]
+
+
+def daily_bias(candles, pivot=None):
+    """Layered bias engine. Returns (direction, quality_label)."""
+    pivot = PIVOT_BIAS if pivot is None else pivot
+    highs, lows = find_swings(candles, pivot)
+
+    established, inval_level, inval_i = None, None, None
+    n = min(len(highs), len(lows))
+    for k in range(1, n):
+        hp, hc = highs[-k - 1][1], highs[-k][1]
+        lp, lc = lows[-k - 1][1],  lows[-k][1]
+        if hc > hp and lc > lp:
+            established, inval_level, inval_i = "bullish", lows[-k][1], lows[-k][0]
+            break
+        if hc < hp and lc < lp:
+            established, inval_level, inval_i = "bearish", highs[-k][1], highs[-k][0]
+            break
+
+    if established:
+        broken = False
+        for c in candles[inval_i + 1:]:
+            if established == "bullish" and c["c"] < inval_level:
+                broken = True
+                break
+            if established == "bearish" and c["c"] > inval_level:
+                broken = True
+                break
+        if not broken:
+            strong = three_swing_aligned(highs, lows, established)
+            return established, ("strong" if strong else "valid")
+
+    ma = sma(candles, MA_PERIOD)
+    if ma:
+        price = candles[-1]["c"]
+        prev_ma = sma(candles[:-5], MA_PERIOD) if len(candles) > MA_PERIOD + 5 else None
+        if prev_ma:
+            if price > ma and ma > prev_ma:
+                return "bullish", "weak (MA only)"
+            if price < ma and ma < prev_ma:
+                return "bearish", "weak (MA only)"
+    return None, "no structure"
 
 
 def four_hour_zone(candles, bias):
@@ -238,7 +290,7 @@ def one_hour_trigger(symbol, candles, zone, bias):
     return None, None
 
 
-def entry_message(symbol, bias, zone, trigger, quality, price):
+def entry_message(symbol, bias, zone, trigger, quality, price, bias_q="valid", h4_q="valid"):
     side, emoji = ("BUY", "🟢") if bias == "bullish" else ("SELL", "🔴")
     sl, tp1, tp2 = zone["sl"], zone["tp1"], zone["tp2"]
     risk = abs(price - sl)
@@ -249,9 +301,11 @@ def entry_message(symbol, bias, zone, trigger, quality, price):
 
     deep = (price <= zone["z_prime"]) if bias == "bullish" else (price >= zone["z_prime"])
     grade = []
-    grade.append("deep zone (0.5-0.618) OK" if deep else "shallow zone (0.382-0.5) !")
-    grade.append("4H confluence OK" if zone["confluence"] else "no prior-level confluence !")
-    grade.append("1H structure break OK" if quality == "structure" else "candle confirmation only !")
+    grade.append("deep zone (0.5-0.618) ✅" if deep else "shallow zone (0.382-0.5) ⚠️")
+    grade.append("4H structure confluence ✅" if zone["confluence"] else "no prior-level confluence ⚠️")
+    grade.append("1H structure break ✅" if quality == "structure" else "candle confirmation only ⚠️")
+    grade.append(f"daily trend: {bias_q}" + (" ✅" if bias_q in ("strong", "valid") else " ⚠️"))
+    grade.append(f"4H trend: {h4_q}" + (" ✅" if h4_q in ("strong", "valid") else " ⚠️"))
 
     return (
         f"{emoji} *{side} — {symbol}*\n"
@@ -260,24 +314,26 @@ def entry_message(symbol, bias, zone, trigger, quality, price):
         f"Stop Loss: `{fmt(symbol, sl)}`  ({dist_label(symbol, risk)})\n"
         f"TP1 (-0.382): `{fmt(symbol, tp1)}`  — RR {rr1:.2f}:1\n"
         f"TP2 (-0.618): `{fmt(symbol, tp2)}`  — RR {rr2:.2f}:1\n\n"
-        f"📐 *Lot size: {lots:.2f}*  (risking {RISK_PERCENT}% = ${risk_usd:,.0f})\n"
+        + (f"📐 *Lot size: {lots:.2f}*  (risking {RISK_PERCENT}% = ${risk_usd:,.0f})\n"
+           if lots > 0 else
+           f"📐 *Lot size: size manually* (risk ${risk_usd:,.0f} over {dist_label(symbol, risk)})\n") +
         f"{losses_to_cap} straight losses to reach the {DAILY_LOSS_CAP}% daily cap\n\n"
         f"4H golden zone: `{fmt(symbol, zone['z_bot'])}` – `{fmt(symbol, zone['z_top'])}`\n"
         f"Trigger: {trigger}\n"
-        f"Setup grade: " + " | ".join(grade) + "\n\n"
+        f"Setup grade:\n• " + "\n• ".join(grade) + "\n\n"
         f"_Check the chart before entering. Not financial advice._"
     )
 
 
-def armed_message(symbol, bias, zone, price):
+def armed_message(symbol, bias, zone, price, bias_q="valid"):
     side = "LONG" if bias == "bullish" else "SHORT"
     return (
         f"⚡ *ZONE ARMED — {symbol}* ({side} setup building)\n\n"
-        f"Daily bias: *{bias}* · 4H impulse leg "
+        f"Daily bias: *{bias}* ({bias_q}) · 4H impulse leg "
         f"`{fmt(symbol, zone['leg_lo'])}` → `{fmt(symbol, zone['leg_hi'])}`\n"
         f"🎯 Golden zone: `{fmt(symbol, zone['z_bot'])}` – `{fmt(symbol, zone['z_top'])}`\n"
         f"Price now: `{fmt(symbol, price)}`\n"
-        f"Confluence: {'prior 4H level in zone OK' if zone['confluence'] else 'none'}\n\n"
+        f"Confluence: {'prior 4H level in zone ✅' if zone['confluence'] else 'none ⚠️'}\n\n"
         f"Planned SL `{fmt(symbol, zone['sl'])}` | TP1 `{fmt(symbol, zone['tp1'])}` | "
         f"TP2 `{fmt(symbol, zone['tp2'])}`\n\n"
         f"_Now waiting for 1H evidence (swing break or confirmation candle)._"
@@ -285,27 +341,31 @@ def armed_message(symbol, bias, zone, price):
 
 
 def analyze(symbol):
+    global USDJPY_RATE
     d = get_candles(symbol, TF_BIAS, N_BIAS)
     time.sleep(8)
     if not d or len(d) < 30:
         return f"{symbol}: daily data unavailable", None
 
-    bias = daily_bias(d)
+    if symbol == "USD/JPY":
+        USDJPY_RATE = d[-1]["c"]
+
+    bias, bias_q = daily_bias(d)
     if bias is None:
-        return f"{symbol}: daily ranging — standing aside", None
+        return f"{symbol}: daily {bias_q} — standing aside", None
 
     h4 = get_candles(symbol, TF_ZONE, N_ZONE)
     time.sleep(8)
     if not h4 or len(h4) < 40:
         return f"{symbol}: 4H data unavailable", None
 
-    h4_bias = daily_bias(h4)
+    h4_bias, h4_q = daily_bias(h4, PIVOT_ZONE)
     if h4_bias != bias:
-        return f"{symbol}: daily {bias}, 4H not aligned — no trade", None
+        return f"{symbol}: daily {bias} ({bias_q}), 4H not aligned — no trade", None
 
     zone = four_hour_zone(h4, bias)
     if zone is None:
-        return f"{symbol}: daily {bias}, no significant 4H leg yet", None
+        return f"{symbol}: daily {bias} ({bias_q}), no significant 4H leg yet", None
 
     h1 = get_candles(symbol, TF_ENTRY, N_ENTRY)
     time.sleep(8)
@@ -320,18 +380,19 @@ def analyze(symbol):
     trigger, quality = one_hour_trigger(symbol, h1, zone, bias)
 
     if trigger and fresh:
-        send_telegram(entry_message(symbol, bias, zone, trigger, quality, price))
-        return (f"{symbol}: daily {bias} | 4H zone | ENTRY SENT ({quality})",
+        send_telegram(entry_message(symbol, bias, zone, trigger, quality, price,
+                                    bias_q, h4_q))
+        return (f"{symbol}: daily {bias} ({bias_q}) | ENTRY SENT ({quality})",
                 "long" if bias == "bullish" else "short")
 
     if in_zone_now and not prev_in_zone:
-        send_telegram(armed_message(symbol, bias, zone, price))
-        return f"{symbol}: daily {bias} | price entered zone — awaiting 1H evidence", None
+        send_telegram(armed_message(symbol, bias, zone, price, bias_q))
+        return f"{symbol}: daily {bias} ({bias_q}) | entered zone — awaiting 1H evidence", None
 
     if in_zone_now:
-        return f"{symbol}: daily {bias} | in zone, no 1H evidence yet", None
+        return f"{symbol}: daily {bias} ({bias_q}) | in zone, no 1H evidence yet", None
 
-    return (f"{symbol}: daily {bias} | zone "
+    return (f"{symbol}: daily {bias} ({bias_q}) | zone "
             f"{fmt(symbol, zone['z_bot'])}-{fmt(symbol, zone['z_top'])}, awaiting retrace"), None
 
 
@@ -355,6 +416,15 @@ def main():
                 "EUR/USD and USD/JPY signalled opposite directions — that is the same "
                 "USD bet placed twice, so your real risk is doubled.\n\n"
                 f"Take one, or halve the lot size on each to keep total risk at {RISK_PERCENT}%."
+            )
+
+    if "USD/JPY" in fired and "GBP/JPY" in fired:
+        if fired["USD/JPY"] == fired["GBP/JPY"]:
+            send_telegram(
+                "⚠️ *Correlation warning*\n\n"
+                "USD/JPY and GBP/JPY signalled the same direction — both are yen bets, "
+                "so your real risk is doubled.\n\n"
+                f"Take one, or halve the lot size on each."
             )
 
     now = datetime.now(timezone.utc)
