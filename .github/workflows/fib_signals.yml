@@ -2,7 +2,7 @@ name: Fib Structure Signals
 
 on:
   schedule:
-    - cron: '*/5 * * * 1-5'
+    - cron: '5,25,45 * * * 1-5'
   workflow_dispatch:
 
 jobs:
