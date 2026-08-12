@@ -1,13 +1,13 @@
 """
-Fib Structure Bot — BACKTEST ENGINE v2
+Fib Structure Bot — BACKTEST ENGINE v3
 
-Tests TWO strategy speeds head to head over real history:
-  SLOW = Daily -> 4H -> 1H     (what you run now)
-  FAST = 4H -> 1H -> 15min     (one gear lower, more setups)
+Four surviving pairs, one proven speed (Daily -> 4H -> 1H).
+Tests pivot (2,3,4) x min_leg_atr (1.0 - 2.5) with the MA fallback off.
+Reports a robustness check (plateau vs curve-fit spike) and the
+FundedNext challenge math in percent terms.
 
-Across 8 pairs, with a KEEP/DROP verdict for each.
-Your fib settings are fixed: zone 0.382-0.618, SL beyond 1.0 + buffer,
-TP1 -0.382, TP2 -0.618. Only pivot, min_leg_atr and MA fallback are tuned.
+Your fib settings are fixed and untouched:
+zone 0.382-0.618, SL beyond 1.0 + buffer, TP1 -0.382, TP2 -0.618.
 """
 
 import os
@@ -21,19 +21,17 @@ API_KEY = os.environ.get("TWELVE_DATA_API_KEY", "")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-SYMBOLS = ["XAU/USD", "EUR/USD", "USD/JPY", "GBP/JPY",
-           "AUD/USD", "USD/CAD", "EUR/JPY", "XAG/USD"]
+# The four survivors. GBP/JPY dropped (negative in two independent runs),
+# AUD/USD and USD/CAD dropped (negative), XAG/USD needs a paid data plan.
+SYMBOLS = ["XAU/USD", "EUR/USD", "USD/JPY", "EUR/JPY"]
 
-COST = {"XAU/USD": 0.35, "EUR/USD": 0.00012, "USD/JPY": 0.015, "GBP/JPY": 0.025,
-        "AUD/USD": 0.00015, "USD/CAD": 0.00018, "EUR/JPY": 0.020, "XAG/USD": 0.020}
+COST = {"XAU/USD": 0.35, "EUR/USD": 0.00012, "USD/JPY": 0.015, "EUR/JPY": 0.020}
 
+# FAST (4H->1H->15min) was tested: 96 trades, -0.2R. Dropped.
 SPEEDS = {
-    "SLOW (D->4H->1H)":   {"bias": "1day", "zone": "4h", "entry": "1h",
-                           "bias_n": 1500, "zone_n": 5000, "entry_n": 5000,
-                           "bars_max": 240},
-    "FAST (4H->1H->15m)": {"bias": "4h", "zone": "1h", "entry": "15min",
-                           "bias_n": 5000, "zone_n": 5000, "entry_n": 5000,
-                           "bars_max": 400},
+    "Daily -> 4H -> 1H": {"bias": "1day", "zone": "4h", "entry": "1h",
+                          "bias_n": 1500, "zone_n": 5000, "entry_n": 5000,
+                          "bars_max": 240},
 }
 
 ZONE_LOW, ZONE_HIGH, ZONE_PRIME = 0.382, 0.618, 0.5
@@ -46,8 +44,8 @@ MIN_RR   = 1.5
 ZONE_TOL = 0.10
 
 GRID_PIVOT = [2, 3, 4]
-GRID_MINLEG = [1.0, 1.5, 2.0, 2.5]
-GRID_MA = [False, True]
+GRID_MINLEG = [1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5]
+GRID_MA = [False]        # settled: MA fallback lost money in every test
 
 MAX_BARS_IN_TRADE = 240
 
@@ -156,354 +154,4 @@ def bias_at(candles, hi, lo, upto, allow_ma):
     return None, "none"
 
 
-def atr_at(candles, upto, period=14):
-    lo = max(1, upto - period + 1)
-    trs = []
-    for i in range(lo, upto + 1):
-        p, c = candles[i - 1], candles[i]
-        trs.append(max(c["h"] - c["l"], abs(c["h"] - p["c"]), abs(c["l"] - p["c"])))
-    return sum(trs) / len(trs) if trs else 0.0
-
-
-def zone_at(candles, hi, lo, upto, bias, min_leg_atr):
-    highs, lows = visible(hi, upto), visible(lo, upto)
-    if len(highs) < 2 or len(lows) < 2:
-        return None
-    a = atr_at(candles, upto)
-    if a <= 0:
-        return None
-
-    if bias == "bullish":
-        li, leg_lo, _ = lows[-1]
-        seg = candles[li: upto + 1]
-        if not seg:
-            return None
-        leg_hi = max(c["h"] for c in seg)
-        leg = leg_hi - leg_lo
-        if leg < min_leg_atr * a:
-            return None
-        z_top = leg_hi - ZONE_LOW * leg
-        z_bot = leg_hi - ZONE_HIGH * leg
-        z_pr = leg_hi - ZONE_PRIME * leg
-        sl = leg_lo - SL_BUFFER * leg
-        tp1 = leg_hi + TP1_EXT * leg
-        tp2 = leg_hi + TP2_EXT * leg
-    else:
-        hidx, leg_hi, _ = highs[-1]
-        seg = candles[hidx: upto + 1]
-        if not seg:
-            return None
-        leg_lo = min(c["l"] for c in seg)
-        leg = leg_hi - leg_lo
-        if leg < min_leg_atr * a:
-            return None
-        z_bot = leg_lo + ZONE_LOW * leg
-        z_top = leg_lo + ZONE_HIGH * leg
-        z_pr = leg_lo + ZONE_PRIME * leg
-        sl = leg_hi + SL_BUFFER * leg
-        tp1 = leg_lo - TP1_EXT * leg
-        tp2 = leg_lo - TP2_EXT * leg
-
-    prior = [p for _, p, _ in highs[:-1] + lows[:-1]]
-    conf = any(z_bot <= p <= z_top for p in prior)
-    return {"z_bot": z_bot, "z_top": z_top, "z_prime": z_pr,
-            "sl": sl, "tp1": tp1, "tp2": tp2, "confluence": conf}
-
-
-def trigger_at(c1, hi1, lo1, t, zone, bias):
-    z_bot, z_top = zone["z_bot"], zone["z_top"]
-    lo_i = max(0, t - ZONE_LOOKBACK + 1)
-    if not any(c["l"] <= z_top and c["h"] >= z_bot for c in c1[lo_i: t + 1]):
-        return None
-
-    highs, lows = visible(hi1, t), visible(lo1, t)
-    last, prev = c1[t], c1[t - 1]
-
-    if bias == "bullish" and highs:
-        si, sp, _ = highs[-1]
-        if last["c"] > sp and si >= t - ZONE_LOOKBACK:
-            return "structure"
-    if bias == "bearish" and lows:
-        si, sp, _ = lows[-1]
-        if last["c"] < sp and si >= t - ZONE_LOOKBACK:
-            return "structure"
-
-    if last["l"] <= z_top and last["h"] >= z_bot:
-        body = abs(last["c"] - last["o"])
-        rng = last["h"] - last["l"]
-        if rng > 0:
-            up = last["h"] - max(last["c"], last["o"])
-            dn = min(last["c"], last["o"]) - last["l"]
-            if bias == "bullish":
-                if (last["c"] > last["o"] and prev["c"] < prev["o"]
-                        and last["c"] > prev["o"] and last["o"] < prev["c"]):
-                    return "candle"
-                if dn > 2 * body and dn > 0.5 * rng:
-                    return "candle"
-            else:
-                if (last["c"] < last["o"] and prev["c"] > prev["o"]
-                        and last["c"] < prev["o"] and last["o"] > prev["c"]):
-                    return "candle"
-                if up > 2 * body and up > 0.5 * rng:
-                    return "candle"
-    return None
-
-
-def simulate(c1, entry_i, entry, sl, tp1, tp2, bias, bars_max=MAX_BARS_IN_TRADE):
-    risk = abs(entry - sl)
-    if risk <= 0:
-        return None
-    r1 = abs(tp1 - entry) / risk
-    r2 = abs(tp2 - entry) / risk
-    hit1 = False
-    for j in range(entry_i, min(entry_i + bars_max, len(c1))):
-        h, l = c1[j]["h"], c1[j]["l"]
-        if bias == "bullish":
-            sl_hit, t1_hit, t2_hit = l <= sl, h >= tp1, h >= tp2
-        else:
-            sl_hit, t1_hit, t2_hit = h >= sl, l <= tp1, l <= tp2
-        if sl_hit:
-            return {"tp1": r1 if hit1 else -1.0,
-                    "tp2": -1.0,
-                    "split": (0.5 * r1 + 0.0) if hit1 else -1.0,
-                    "bars": j - entry_i}
-        if t2_hit:
-            return {"tp1": r1, "tp2": r2,
-                    "split": 0.5 * r1 + 0.5 * r2, "bars": j - entry_i}
-        if t1_hit and not hit1:
-            hit1 = True
-    return {"tp1": r1 if hit1 else 0.0, "tp2": 0.0,
-            "split": 0.5 * r1 if hit1 else 0.0, "bars": bars_max}
-
-
-def map_index(src, target_times, lag):
-    out, j = [], -1
-    for t in target_times:
-        while j + 1 < len(src) and src[j + 1]["dt"] + lag <= t:
-            j += 1
-        out.append(j)
-    return out
-
-
-_SWCACHE = {}
-
-
-def cached_swings(sym, tf, candles, pivot):
-    k = (sym, tf, pivot)
-    if k not in _SWCACHE:
-        _SWCACHE[k] = swings(candles, pivot)
-    return _SWCACHE[k]
-
-
-def run_combo(data, pivot, min_leg, allow_ma, spec=None, bars_max=240):
-    spec = spec or {"bias": "1day", "zone": "4h", "entry": "1h"}
-    trades = []
-    for sym, d in data.items():
-        c1, c4, cd = d[spec["entry"]], d[spec["zone"]], d[spec["bias"]]
-        hi_d, lo_d = cached_swings(sym, spec["bias"], cd, pivot)
-        hi_4, lo_4 = cached_swings(sym, spec["zone"], c4, pivot)
-        hi_1, lo_1 = cached_swings(sym, spec["entry"] + "e", c1, PIVOT_ENTRY)
-        idx_d, idx_4 = d["map_d"], d["map_4"]
-        cost = COST[sym]
-
-        open_until = -1
-        for t in range(60, len(c1) - 2):
-            if t <= open_until:
-                continue
-            di, fi = idx_d[t], idx_4[t]
-            if di < 30 or fi < 40:
-                continue
-
-            bias, q = bias_at(cd, hi_d, lo_d, di, allow_ma)
-            if bias is None:
-                continue
-            b4, _ = bias_at(c4, hi_4, lo_4, fi, allow_ma)
-            if b4 != bias:
-                continue
-            zone = zone_at(c4, hi_4, lo_4, fi, bias, min_leg)
-            if zone is None:
-                continue
-            trg = trigger_at(c1, hi_1, lo_1, t, zone, bias)
-            if trg is None:
-                continue
-
-            nxt = c1[t + 1]["o"]
-            entry = nxt + cost if bias == "bullish" else nxt - cost
-
-            width = max(zone["z_top"] - zone["z_bot"], 1e-9)
-            pad = ZONE_TOL * width
-            if not (zone["z_bot"] - pad <= entry <= zone["z_top"] + pad):
-                continue
-
-            risk = abs(entry - zone["sl"])
-            if risk <= 0:
-                continue
-            if (abs(zone["tp1"] - entry) / risk) < MIN_RR:
-                continue
-
-            res = simulate(c1, t + 1, entry, zone["sl"], zone["tp1"], zone["tp2"],
-                           bias, bars_max)
-            if res is None:
-                continue
-            deep = (entry <= zone["z_prime"]) if bias == "bullish" else (entry >= zone["z_prime"])
-            trades.append({"sym": sym, "grade": q, "trg": trg, "deep": deep,
-                           "conf": zone["confluence"], "dt": c1[t + 1]["dt"], **res})
-            open_until = t + 1 + res["bars"]
-    return trades
-
-
-def stats(trades, key="split"):
-    if not trades:
-        return None
-    rs = [t[key] for t in trades]
-    wins = [r for r in rs if r > 0]
-    losses = [r for r in rs if r <= 0]
-    streak = worst = 0
-    for r in rs:
-        streak = streak + 1 if r <= 0 else 0
-        worst = max(worst, streak)
-    eq, peak, dd = 0.0, 0.0, 0.0
-    for r in rs:
-        eq += r
-        peak = max(peak, eq)
-        dd = max(dd, peak - eq)
-    gp = sum(wins)
-    gl = abs(sum(losses))
-    span_days = (max(t["dt"] for t in trades) - min(t["dt"] for t in trades)).days or 1
-    return {"n": len(rs), "win": 100.0 * len(wins) / len(rs), "totR": eq,
-            "avgR": eq / len(rs), "pf": (gp / gl) if gl else float("inf"),
-            "streak": worst, "maxdd": dd, "perweek": len(rs) / (span_days / 7.0)}
-
-
-def lag_for(interval):
-    return {"1day": timedelta(days=1), "4h": timedelta(hours=4),
-            "1h": timedelta(hours=1), "15min": timedelta(minutes=15)}[interval]
-
-
-def load_symbol(sym, spec):
-    d = {}
-    for key, size in (("bias", spec["bias_n"]), ("zone", spec["zone_n"]),
-                      ("entry", spec["entry_n"])):
-        iv = spec[key]
-        if iv in d:
-            continue
-        c = fetch(sym, iv, size)
-        if not c:
-            return None
-        d[iv] = c
-        time.sleep(8)
-    times = [c["dt"] for c in d[spec["entry"]]]
-    d["map_d"] = map_index(d[spec["bias"]], times, lag_for(spec["bias"]))
-    d["map_4"] = map_index(d[spec["zone"]], times, lag_for(spec["zone"]))
-    return d
-
-
-def report(name, data, spec):
-    print("\n" + "#" * 64)
-    print(f"# {name}")
-    print("#" * 64)
-
-    results = []
-    for ma in GRID_MA:
-        for p in GRID_PIVOT:
-            for ml in GRID_MINLEG:
-                tr = run_combo(data, p, ml, ma, spec, spec["bars_max"])
-                s = stats(tr)
-                if s:
-                    s.update({"pivot": p, "minleg": ml, "ma": ma, "trades": tr})
-                    results.append(s)
-                    print(f"  pivot={p} minleg={ml} ma={str(ma):5s}: "
-                          f"{s['n']:4d} trades  win {s['win']:5.1f}%  "
-                          f"totR {s['totR']:+7.1f}  PF {s['pf']:5.2f}  "
-                          f"streak {s['streak']:2d}  {s['perweek']:.1f}/wk")
-    if not results:
-        print("  no trades in any combination")
-        return None
-
-    pool = [r for r in results if r["n"] >= 20] or results
-    best = max(pool, key=lambda r: r["totR"])
-    tr = best["trades"]
-
-    print(f"\n  BEST: pivot={best['pivot']} min_leg_atr={best['minleg']} MA={best['ma']}")
-    print(f"    {best['n']} trades | win {best['win']:.1f}% | {best['totR']:+.1f}R "
-          f"| avg {best['avgR']:+.2f}R | PF {best['pf']:.2f}")
-    print(f"    longest losing streak {best['streak']} | "
-          f"max DD {best['maxdd']:.1f}R (~{best['maxdd']*0.5:.1f}% at 0.5% risk)")
-    print(f"    frequency {best['perweek']:.1f} trades/week")
-
-    print("\n  BY SYMBOL (best combo)")
-    for k in sorted(set(t["sym"] for t in tr)):
-        s = stats([t for t in tr if t["sym"] == k])
-        flag = "KEEP" if s["totR"] > 0 else "DROP"
-        print(f"    {k:9s} n={s['n']:3d}  win {s['win']:5.1f}%  "
-              f"totR {s['totR']:+6.1f}  avg {s['avgR']:+.2f}R   <- {flag}")
-
-    print("\n  BY GRADE")
-    for k in sorted(set(t["grade"] for t in tr)):
-        s = stats([t for t in tr if t["grade"] == k])
-        print(f"    {k:8s} n={s['n']:3d}  win {s['win']:5.1f}%  avg {s['avgR']:+.2f}R")
-
-    print("\n  EXIT STYLE")
-    for style in ("tp1", "tp2", "split"):
-        s = stats(tr, style)
-        print(f"    {style:6s} win {s['win']:5.1f}%  totR {s['totR']:+7.1f}  "
-              f"avg {s['avgR']:+.2f}R  PF {s['pf']:.2f}")
-    return best
-
-
-def main():
-    summary = {}
-    for name, spec in SPEEDS.items():
-        print(f"\nFetching data for {name}…")
-        data = {}
-        for sym in SYMBOLS:
-            d = load_symbol(sym, spec)
-            if d is None:
-                print(f"  {sym}: incomplete, skipped")
-                continue
-            data[sym] = d
-            e = d[spec["entry"]]
-            print(f"  {sym}: {len(e)} x {spec['entry']} "
-                  f"{e[0]['dt'].date()} -> {e[-1]['dt'].date()}")
-        if not data:
-            print("  no data for this speed")
-            continue
-        _SWCACHE.clear()
-        _KEYCACHE.clear()
-        best = report(name, data, spec)
-        if best:
-            summary[name] = best
-
-    if not summary:
-        print("\nNothing to compare.")
-        return
-
-    print("\n" + "=" * 64)
-    print("HEAD TO HEAD")
-    print("=" * 64)
-    for name, b in summary.items():
-        print(f"  {name:20s} {b['n']:4d} trades  {b['perweek']:4.1f}/wk  "
-              f"win {b['win']:5.1f}%  {b['totR']:+7.1f}R  "
-              f"avg {b['avgR']:+.2f}R  PF {b['pf']:.2f}  streak {b['streak']}")
-
-    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        lines = ["📊 *Backtest — speed comparison*\n"]
-        for name, b in summary.items():
-            lines.append(
-                f"*{name}*\n"
-                f"pivot `{b['pivot']}` · leg `{b['minleg']}` · MA `{b['ma']}`\n"
-                f"{b['n']} trades ({b['perweek']:.1f}/wk) · win {b['win']:.1f}%\n"
-                f"{b['totR']:+.1f}R total · avg {b['avgR']:+.2f}R · PF {b['pf']:.2f}\n"
-                f"worst streak {b['streak']} · maxDD {b['maxdd']:.1f}R\n")
-        lines.append("_Per-pair breakdown in the Actions log._")
-        try:
-            requests.post(
-                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                json={"chat_id": TELEGRAM_CHAT_ID, "text": "\n".join(lines),
-                      "parse_mode": "Markdown"}, timeout=20)
-        except Exception as e:
-            print(f"[warn] telegram: {e}")
-
-
-if __name__ == "__main__":
-    main()
+def atr_at(candles,
