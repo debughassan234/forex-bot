@@ -1,6 +1,6 @@
-"""Fib Structure Bot — BACKTEST v3
-Four pairs, Daily->4H->1H, MA fallback off.
-Grid: pivot 2/3/4 x min_leg_atr 1.0-2.5. Reports robustness + challenge math.
+"""Fib Structure Bot — BACKTEST v4
+Four pairs, three speeds tested head to head, MA fallback off,
+London+NY session filter (07:00-21:00 UTC, Asian session excluded).
 Fib settings fixed: zone 0.382-0.618, SL beyond 1.0, TP1 -0.382, TP2 -0.618.
 """
 
@@ -19,10 +19,21 @@ SYMBOLS = ["XAU/USD", "EUR/USD", "USD/JPY", "EUR/JPY"]
 COST = {"XAU/USD": 0.35, "EUR/USD": 0.00012, "USD/JPY": 0.015, "EUR/JPY": 0.020}
 
 SPEEDS = {
-    "Daily -> 4H -> 1H": {"bias": "1day", "zone": "4h", "entry": "1h",
-                          "bias_n": 1500, "zone_n": 5000, "entry_n": 5000,
-                          "bars_max": 240},
+    "SWING  D->4H->1H":   {"bias": "1day", "zone": "4h", "entry": "1h",
+                           "bias_n": 1500, "zone_n": 5000, "entry_n": 5000,
+                           "bars_max": 240},
+    "INTRA  4H->1H->15m": {"bias": "4h", "zone": "1h", "entry": "15min",
+                           "bias_n": 5000, "zone_n": 5000, "entry_n": 5000,
+                           "bars_max": 400},
+    "DAY    1H->15m->5m": {"bias": "1h", "zone": "15min", "entry": "5min",
+                           "bias_n": 5000, "zone_n": 5000, "entry_n": 5000,
+                           "bars_max": 576},
 }
+
+# London opens 07:00 UTC, New York closes 21:00 UTC. Asian chop excluded.
+USE_SESSION_FILTER = True
+SESSION_START_UTC = 7
+SESSION_END_UTC = 21
 
 ZONE_LOW, ZONE_HIGH, ZONE_PRIME = 0.382, 0.618, 0.5
 SL_BUFFER, TP1_EXT, TP2_EXT = 0.10, 0.382, 0.618
@@ -313,6 +324,11 @@ def run_combo(data, pivot, min_leg, allow_ma, spec=None, bars_max=240):
             if trg is None:
                 continue
 
+            if USE_SESSION_FILTER:
+                hr = c1[t + 1]["dt"].hour
+                if not (SESSION_START_UTC <= hr < SESSION_END_UTC):
+                    continue
+
             nxt = c1[t + 1]["o"]
             entry = nxt + cost if bias == "bullish" else nxt - cost
 
@@ -363,7 +379,8 @@ def stats(trades, key="split"):
 
 def lag_for(interval):
     return {"1day": timedelta(days=1), "4h": timedelta(hours=4),
-            "1h": timedelta(hours=1), "15min": timedelta(minutes=15)}[interval]
+            "1h": timedelta(hours=1), "15min": timedelta(minutes=15),
+            "5min": timedelta(minutes=5)}[interval]
 
 
 def load_symbol(sym, spec):
@@ -398,7 +415,7 @@ def report(name, data, spec):
                 if s:
                     s.update({"pivot": p, "minleg": ml, "ma": ma, "trades": tr})
                     results.append(s)
-                    print(f"  pivot={p} minleg={ml} ma={str(ma):5s}: "
+                    print(f"  pivot={p} minleg={ml}: "
                           f"{s['n']:4d} trades  win {s['win']:5.1f}%  "
                           f"totR {s['totR']:+7.1f}  PF {s['pf']:5.2f}  "
                           f"streak {s['streak']:2d}  {s['perweek']:.1f}/wk")
@@ -410,24 +427,19 @@ def report(name, data, spec):
     best = max(pool, key=lambda r: r["totR"])
     tr = best["trades"]
 
-    print(f"\n  BEST: pivot={best['pivot']} min_leg_atr={best['minleg']} MA={best['ma']}")
+    print(f"\n  BEST: pivot={best['pivot']} min_leg_atr={best['minleg']}")
     print(f"    {best['n']} trades | win {best['win']:.1f}% | {best['totR']:+.1f}R "
           f"| avg {best['avgR']:+.2f}R | PF {best['pf']:.2f}")
     print(f"    longest losing streak {best['streak']} | "
           f"max DD {best['maxdd']:.1f}R (~{best['maxdd']*0.5:.1f}% at 0.5% risk)")
-    print(f"    frequency {best['perweek']:.1f} trades/week")
+    print(f"    frequency {best['perweek']:.1f}/week = {best['perweek']/5:.1f}/day")
 
-    print("\n  BY SYMBOL (best combo)")
+    print("\n  BY SYMBOL")
     for k in sorted(set(t["sym"] for t in tr)):
         s = stats([t for t in tr if t["sym"] == k])
         flag = "KEEP" if s["totR"] > 0 else "DROP"
         print(f"    {k:9s} n={s['n']:3d}  win {s['win']:5.1f}%  "
               f"totR {s['totR']:+6.1f}  avg {s['avgR']:+.2f}R   <- {flag}")
-
-    print("\n  BY GRADE")
-    for k in sorted(set(t["grade"] for t in tr)):
-        s = stats([t for t in tr if t["grade"] == k])
-        print(f"    {k:8s} n={s['n']:3d}  win {s['win']:5.1f}%  avg {s['avgR']:+.2f}R")
 
     print("\n  EXIT STYLE")
     for style in ("tp1", "tp2", "split"):
@@ -435,33 +447,25 @@ def report(name, data, spec):
         print(f"    {style:6s} win {s['win']:5.1f}%  totR {s['totR']:+7.1f}  "
               f"avg {s['avgR']:+.2f}R  PF {s['pf']:.2f}")
 
-    print("\n  ROBUSTNESS (neighbours of the best setting)")
+    print("\n  ROBUSTNESS")
     same = sorted([r for r in results if r["pivot"] == best["pivot"]],
                   key=lambda r: r["minleg"])
     for r in same:
         mark = "  <-- BEST" if r is best else ""
         print(f"    minleg {r['minleg']:<5} n={r['n']:3d}  totR {r['totR']:+6.1f}  "
-              f"PF {r['pf']:5.2f}  {r['perweek']:.1f}/wk{mark}")
+              f"PF {r['pf']:5.2f}{mark}")
     pos = sum(1 for r in same if r["totR"] > 0)
-    print(f"    -> {pos}/{len(same)} leg settings profitable at pivot={best['pivot']}")
-    if pos >= len(same) - 1:
-        print("    -> PLATEAU: the edge is not dependent on one lucky setting")
-    else:
-        print("    -> SPIKE: treat this result with suspicion (possible curve-fit)")
-
-    print("\n  CHALLENGE MATH (0.5% risk per trade)")
-    weeks = (10.0 / (best["avgR"] * 0.5)) / best["perweek"] if best["avgR"] > 0 else 0
-    need = int(10.0 / (best["avgR"] * 0.5)) if best["avgR"] > 0 else 0
-    print(f"    avg {best['avgR']:+.2f}R = {best['avgR']*0.5:+.2f}% per trade")
-    print(f"    10% target needs ~{need} net trades = ~{weeks:.0f} weeks "
-          f"at {best['perweek']:.1f}/wk")
-    print(f"    worst drawdown seen: {best['maxdd']*0.5:.1f}% (FundedNext kills at 10%)")
-    print(f"    worst losing streak: {best['streak']} = {best['streak']*0.5:.1f}% "
-          f"if they land on one day (daily cap 5%)")
+    print(f"    -> {pos}/{len(same)} profitable at pivot={best['pivot']}")
+    print("    -> PLATEAU (edge is robust)" if pos >= len(same) - 1
+          else "    -> SPIKE (possible curve-fit, treat with suspicion)")
     return best
 
 
+LAST_DATA = {}
+
+
 def main():
+    global USE_SESSION_FILTER
     summary = {}
     for name, spec in SPEEDS.items():
         print(f"\nFetching data for {name}...")
@@ -478,6 +482,7 @@ def main():
         if not data:
             print("  no data for this speed")
             continue
+        LAST_DATA[name] = data
         _SWCACHE.clear()
         _KEYCACHE.clear()
         best = report(name, data, spec)
@@ -488,18 +493,48 @@ def main():
         print("\nNothing to report.")
         return
 
+    print("\n" + "=" * 70)
+    print("HEAD TO HEAD  (4 pairs, MA off, London+NY session only)")
+    print("=" * 70)
+    for name, b in summary.items():
+        per_day = b["perweek"] / 5.0
+        weeks = (10.0 / (b["avgR"] * 0.5)) / b["perweek"] if b["avgR"] > 0 else 0
+        verdict = "PROFITABLE" if b["totR"] > 0 else "LOSES MONEY"
+        print(f"  {name:20s} {b['n']:4d} trades  {per_day:4.1f}/day  "
+              f"win {b['win']:5.1f}%  {b['totR']:+7.1f}R  avg {b['avgR']:+.2f}R  "
+              f"PF {b['pf']:5.2f}  streak {b['streak']:2d}  -> {verdict}")
+        if b["totR"] > 0:
+            print(f"  {'':20s} ~{weeks:.0f} weeks to a 10% target at 0.5% risk")
+
+    print("\n" + "=" * 70)
+    print("DOES THE SESSION FILTER HELP?  (best speed, on vs off)")
+    print("=" * 70)
+    best_name = max(summary, key=lambda k: summary[k]["totR"])
+    b = summary[best_name]
+    spec = SPEEDS[best_name]
+    data = LAST_DATA.get(best_name)
+    if data:
+        print(f"  speed: {best_name}")
+        for flag in (True, False):
+            USE_SESSION_FILTER = flag
+            _SWCACHE.clear()
+            _KEYCACHE.clear()
+            tr = run_combo(data, b["pivot"], b["minleg"], False, spec, spec["bars_max"])
+            s = stats(tr)
+            if s:
+                print(f"  filter {'ON ' if flag else 'OFF'}: {s['n']:4d} trades  "
+                      f"win {s['win']:5.1f}%  totR {s['totR']:+7.1f}  "
+                      f"PF {s['pf']:5.2f}  {s['perweek']/5:.1f}/day")
+        USE_SESSION_FILTER = True
+
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        lines = ["*Backtest — 4 pairs, MA off*\n"]
+        lines = ["*Backtest — speed comparison*\n"]
         for name, b in summary.items():
-            weeks = (10.0 / (b["avgR"] * 0.5)) / b["perweek"] if b["avgR"] > 0 else 0
             lines.append(
                 f"*{name}*\n"
-                f"Best: pivot `{b['pivot']}` · leg `{b['minleg']}`\n"
-                f"{b['n']} trades ({b['perweek']:.1f}/wk) · win {b['win']:.1f}%\n"
-                f"{b['totR']:+.1f}R · avg {b['avgR']:+.2f}R · PF {b['pf']:.2f}\n"
-                f"Worst streak {b['streak']} · maxDD {b['maxdd']*0.5:.1f}%\n"
-                f"~{weeks:.0f} weeks to a 10% target\n")
-        lines.append("_Robustness + per-pair detail in the Actions log._")
+                f"{b['n']} trades ({b['perweek']/5:.1f}/day) · win {b['win']:.1f}%\n"
+                f"{b['totR']:+.1f}R · avg {b['avgR']:+.2f}R · PF {b['pf']:.2f}\n")
+        lines.append("_Full detail in the Actions log._")
         try:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
