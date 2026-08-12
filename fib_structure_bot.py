@@ -1,11 +1,11 @@
 """
-Fib Structure Bot v8 — Daily -> 4H -> 1H
+Fib Structure Bot v9 — Daily -> 4H -> 1H
 XAU/USD, EUR/USD, USD/JPY, EUR/JPY
 
-Settings below are BACKTESTED, not guessed:
-  32 trades, 56.2% win, +17.5R, PF 2.34, worst streak 3, max DD 1.5%
-  pivot 3 | min_leg_atr 2.0 | MA fallback OFF (profitable across all leg
-  settings 1.0-2.5, so the edge is a plateau not a lucky spike)
+Backtested settings (32 trades, 56% win, +17.5R, PF 2.34, max DD 1.5%):
+  pivot 3 | min_leg_atr 2.0 | MA fallback OFF | no session filter
+
+v9 adds: automatic TP1 / TP2 / SL hit alerts for every signal sent.
 
 Fib settings are the trader's own and unchanged:
 zone 0.382-0.618, SL beyond 1.0 + buffer, TP1 -0.382, TP2 -0.618.
@@ -37,13 +37,17 @@ SL_BUFFER   = 0.10
 TP1_EXT     = 0.382
 TP2_EXT     = 0.618
 
-MIN_LEG_ATR    = 2.0   # backtested optimum
+MIN_LEG_ATR    = 2.0     # backtested optimum
 ZONE_LOOKBACK  = 12
 ENTRY_MAX_AGE  = 15
 MIN_RR         = 1.5
 ZONE_TOL       = 0.10
 STATE_FILE     = "bot_state.json"
 COOLDOWN_HOURS = 12
+
+# ---- TP/SL hit alerts ----
+TRACK_TRADES   = True
+TRACK_MAX_BARS = 240     # ~10 days of 1H candles before a trade is abandoned
 
 # ------- risk / position sizing (edit these to match your account) -------
 ACCOUNT_SIZE   = 100000.0
@@ -56,7 +60,7 @@ CONTRACT   = {"XAU/USD": 100.0, "EUR/USD": 100000.0,
 JPY_QUOTED = {"USD/JPY", "EUR/JPY"}
 PIP        = {"EUR/USD": 0.0001, "USD/JPY": 0.01, "EUR/JPY": 0.01}
 MA_PERIOD  = 50
-USE_MA_FALLBACK = False   # backtest: MA-only bias lost money in every test
+USE_MA_FALLBACK = False  # backtest: MA-only bias lost money in every test
 
 USDJPY_RATE = None
 
@@ -97,6 +101,83 @@ def already_sent(state, symbol, bias, zone):
 def mark_sent(state, symbol, bias, zone):
     state[f"{symbol}|{bias}"] = {"t": datetime.now(timezone.utc).isoformat(),
                                  "z_bot": zone["z_bot"], "z_top": zone["z_top"]}
+
+
+def track_add(state, symbol, bias, price, zone):
+    """Remember a signal so its TP/SL outcome can be reported."""
+    if not TRACK_TRADES:
+        return
+    trades = state.setdefault("open_trades", [])
+    trades.append({
+        "sym": symbol, "dir": bias,
+        "opened": datetime.now(timezone.utc).isoformat(),
+        "entry": price, "sl": zone["sl"], "tp1": zone["tp1"], "tp2": zone["tp2"],
+        "hit_tp1": False, "bars": 0,
+    })
+    if len(trades) > 50:
+        state["open_trades"] = trades[-50:]
+
+
+def track_update(state, symbol, candles):
+    """Resolve open trades against new candles. Returns the ones that closed."""
+    if not TRACK_TRADES or not candles:
+        return []
+
+    trades = state.get("open_trades", [])
+    closed, still_open = [], []
+
+    for tr in trades:
+        if tr["sym"] != symbol:
+            still_open.append(tr)
+            continue
+        try:
+            opened = datetime.fromisoformat(tr["opened"])
+        except Exception:
+            continue
+
+        risk = abs(tr["entry"] - tr["sl"]) or 1e-9
+        r1 = abs(tr["tp1"] - tr["entry"]) / risk
+        r2 = abs(tr["tp2"] - tr["entry"]) / risk
+        done = None
+
+        for c in candles:
+            try:
+                ct = datetime.strptime(c["t"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+            if ct <= opened:
+                continue
+            tr["bars"] += 1
+
+            if tr["dir"] == "bullish":
+                sl_hit = c["l"] <= tr["sl"]
+                t1_hit = c["h"] >= tr["tp1"]
+                t2_hit = c["h"] >= tr["tp2"]
+            else:
+                sl_hit = c["h"] >= tr["sl"]
+                t1_hit = c["l"] <= tr["tp1"]
+                t2_hit = c["l"] <= tr["tp2"]
+
+            if sl_hit:
+                done = ("TP1 then SL", round(0.5 * r1, 2)) if tr["hit_tp1"] else ("SL", -1.0)
+                break
+            if t2_hit:
+                done = ("TP2", round(0.5 * r1 + 0.5 * r2, 2))
+                break
+            if t1_hit and not tr["hit_tp1"]:
+                tr["hit_tp1"] = True
+
+        if done is None and tr["bars"] > TRACK_MAX_BARS:
+            done = ("expired", round(0.5 * r1, 2) if tr["hit_tp1"] else 0.0)
+
+        if done:
+            tr["result"], tr["R"] = done
+            closed.append(tr)
+        else:
+            still_open.append(tr)
+
+    state["open_trades"] = still_open
+    return closed
 
 
 def get_candles(symbol, interval, size):
@@ -205,7 +286,7 @@ def daily_bias(candles, pivot=None):
     n = min(len(highs), len(lows))
     for k in range(1, n):
         hp, hc = highs[-k - 1][1], highs[-k][1]
-        lp, lc = lows[-k - 1][1],  lows[-k][1]
+        lp, lc = lows[-k - 1][1], lows[-k][1]
         if hc > hp and lc > lp:
             established, inval_level, inval_i = "bullish", lows[-k][1], lows[-k][0]
             break
@@ -256,13 +337,12 @@ def four_hour_zone(candles, bias):
         leg = leg_hi - leg_lo
         if leg < MIN_LEG_ATR * a:
             return None
-        z_top = leg_hi - ZONE_LOW   * leg
-        z_bot = leg_hi - ZONE_HIGH  * leg
+        z_top = leg_hi - ZONE_LOW * leg
+        z_bot = leg_hi - ZONE_HIGH * leg
         z_prime = leg_hi - ZONE_PRIME * leg
-        sl  = leg_lo - SL_BUFFER * leg
+        sl = leg_lo - SL_BUFFER * leg
         tp1 = leg_hi + TP1_EXT * leg
         tp2 = leg_hi + TP2_EXT * leg
-        prior = [p for _, p in highs[:-1] + lows[:-1]]
     else:
         leg_hi_i, leg_hi = highs[-1]
         after = candles[leg_hi_i:]
@@ -272,14 +352,14 @@ def four_hour_zone(candles, bias):
         leg = leg_hi - leg_lo
         if leg < MIN_LEG_ATR * a:
             return None
-        z_bot = leg_lo + ZONE_LOW   * leg
-        z_top = leg_lo + ZONE_HIGH  * leg
+        z_bot = leg_lo + ZONE_LOW * leg
+        z_top = leg_lo + ZONE_HIGH * leg
         z_prime = leg_lo + ZONE_PRIME * leg
-        sl  = leg_hi + SL_BUFFER * leg
+        sl = leg_hi + SL_BUFFER * leg
         tp1 = leg_lo - TP1_EXT * leg
         tp2 = leg_lo - TP2_EXT * leg
-        prior = [p for _, p in highs[:-1] + lows[:-1]]
 
+    prior = [p for _, p in highs[:-1] + lows[:-1]]
     confluence = any(z_bot <= p <= z_top for p in prior)
     return {"leg": leg, "leg_hi": leg_hi, "leg_lo": leg_lo,
             "z_bot": z_bot, "z_top": z_top, "z_prime": z_prime,
@@ -291,8 +371,7 @@ def one_hour_trigger(symbol, candles, zone, bias):
     z_bot, z_top = zone["z_bot"], zone["z_top"]
 
     recent = candles[-ZONE_LOOKBACK:]
-    touched = any(c["l"] <= z_top and c["h"] >= z_bot for c in recent)
-    if not touched:
+    if not any(c["l"] <= z_top and c["h"] >= z_bot for c in recent):
         return None, None
 
     highs, lows = find_swings(candles, PIVOT_ENTRY)
@@ -308,10 +387,9 @@ def one_hour_trigger(symbol, candles, zone, bias):
         if last["c"] < sl_v and sl_i >= len(candles) - ZONE_LOOKBACK:
             return f"1H broke its last swing low {fmt(symbol, sl_v)}", "structure"
 
-    in_zone = last["l"] <= z_top and last["h"] >= z_bot
-    if in_zone:
+    if last["l"] <= z_top and last["h"] >= z_bot:
         body = abs(last["c"] - last["o"])
-        rng  = last["h"] - last["l"]
+        rng = last["h"] - last["l"]
         if rng > 0:
             upper = last["h"] - max(last["c"], last["o"])
             lower = min(last["c"], last["o"]) - last["l"]
@@ -330,7 +408,7 @@ def one_hour_trigger(symbol, candles, zone, bias):
     return None, None
 
 
-def entry_message(symbol, bias, zone, trigger, quality, price, bias_q="valid", h4_q="valid"):
+def entry_message(symbol, bias, zone, trigger, quality, price, bias_q, h4_q):
     side, emoji = ("BUY", "🟢") if bias == "bullish" else ("SELL", "🔴")
     sl, tp1, tp2 = zone["sl"], zone["tp1"], zone["tp2"]
     risk = abs(price - sl)
@@ -340,12 +418,18 @@ def entry_message(symbol, bias, zone, trigger, quality, price, bias_q="valid", h
     losses_to_cap = int(DAILY_LOSS_CAP / RISK_PERCENT) if RISK_PERCENT else 0
 
     deep = (price <= zone["z_prime"]) if bias == "bullish" else (price >= zone["z_prime"])
-    grade = []
-    grade.append("deep zone (0.5-0.618) ✅" if deep else "shallow zone (0.382-0.5) ⚠️")
-    grade.append("4H structure confluence ✅" if zone["confluence"] else "no prior-level confluence ⚠️")
-    grade.append("1H structure break ✅" if quality == "structure" else "candle confirmation only ⚠️")
-    grade.append(f"daily trend: {bias_q}" + (" ✅" if bias_q in ("strong", "valid") else " ⚠️"))
-    grade.append(f"4H trend: {h4_q}" + (" ✅" if h4_q in ("strong", "valid") else " ⚠️"))
+    grade = [
+        "deep zone (0.5-0.618) ✅" if deep else "shallow zone (0.382-0.5) ⚠️",
+        "4H structure confluence ✅" if zone["confluence"] else "no prior-level confluence ⚠️",
+        "1H structure break ✅" if quality == "structure" else "candle confirmation only ⚠️",
+        f"daily trend: {bias_q} ✅" if bias_q in ("strong", "valid") else f"daily trend: {bias_q} ⚠️",
+        f"4H trend: {h4_q} ✅" if h4_q in ("strong", "valid") else f"4H trend: {h4_q} ⚠️",
+    ]
+
+    lot_line = (f"📐 *Lot size: {lots:.2f}*  (risking {RISK_PERCENT}% = ${risk_usd:,.0f})\n"
+                if lots > 0 else
+                f"📐 *Lot size: size manually* (risk ${risk_usd:,.0f} over "
+                f"{dist_label(symbol, risk)})\n")
 
     return (
         f"{emoji} *{side} — {symbol}*\n"
@@ -354,9 +438,7 @@ def entry_message(symbol, bias, zone, trigger, quality, price, bias_q="valid", h
         f"Stop Loss: `{fmt(symbol, sl)}`  ({dist_label(symbol, risk)})\n"
         f"TP1 (-0.382): `{fmt(symbol, tp1)}`  — RR {rr1:.2f}:1\n"
         f"TP2 (-0.618): `{fmt(symbol, tp2)}`  — RR {rr2:.2f}:1\n\n"
-        + (f"📐 *Lot size: {lots:.2f}*  (risking {RISK_PERCENT}% = ${risk_usd:,.0f})\n"
-           if lots > 0 else
-           f"📐 *Lot size: size manually* (risk ${risk_usd:,.0f} over {dist_label(symbol, risk)})\n") +
+        + lot_line +
         f"{losses_to_cap} straight losses to reach the {DAILY_LOSS_CAP}% daily cap\n\n"
         f"4H golden zone: `{fmt(symbol, zone['z_bot'])}` – `{fmt(symbol, zone['z_top'])}`\n"
         f"Trigger: {trigger}\n"
@@ -365,7 +447,7 @@ def entry_message(symbol, bias, zone, trigger, quality, price, bias_q="valid", h
     )
 
 
-def armed_message(symbol, bias, zone, price, bias_q="valid"):
+def armed_message(symbol, bias, zone, price, bias_q):
     side = "LONG" if bias == "bullish" else "SHORT"
     return (
         f"⚡ *ZONE ARMED — {symbol}* ({side} setup building)\n\n"
@@ -380,8 +462,22 @@ def armed_message(symbol, bias, zone, price, bias_q="valid"):
     )
 
 
+def closed_message(tr):
+    icon = "🎯" if (tr["R"] or 0) > 0 else "🛑"
+    sym = tr["sym"]
+    return (
+        f"{icon} *Trade closed — {sym}*\n\n"
+        f"{tr['dir'].upper()} from `{fmt(sym, tr['entry'])}`\n"
+        f"Result: *{tr['result']}*  ({tr['R']:+.2f}R)\n\n"
+        f"SL was `{fmt(sym, tr['sl'])}` | TP1 `{fmt(sym, tr['tp1'])}` | "
+        f"TP2 `{fmt(sym, tr['tp2'])}`\n\n"
+        f"_Tracked from the original signal — check your broker for the real fill._"
+    )
+
+
 def analyze(symbol, state):
     global USDJPY_RATE
+
     d = get_candles(symbol, TF_BIAS, N_BIAS)
     time.sleep(8)
     if not d or len(d) < 30:
@@ -412,8 +508,12 @@ def analyze(symbol, state):
     if not h1 or len(h1) < 40:
         return f"{symbol}: 1H data unavailable", None
 
+    for done in track_update(state, symbol, h1):
+        send_telegram(closed_message(done))
+        print(f"  closed {done['sym']} {done['result']} {done['R']:+.2f}R")
+
     price = h1[-1]["c"]
-    in_zone_now  = zone["z_bot"] <= price <= zone["z_top"]
+    in_zone_now = zone["z_bot"] <= price <= zone["z_top"]
     prev_in_zone = zone["z_bot"] <= h1[-2]["c"] <= zone["z_top"]
     fresh = candle_age_minutes(h1) <= ENTRY_MAX_AGE
 
@@ -439,6 +539,7 @@ def analyze(symbol, state):
         send_telegram(entry_message(symbol, bias, zone, trigger, quality, price,
                                     bias_q, h4_q))
         mark_sent(state, symbol, bias, zone)
+        track_add(state, symbol, bias, price, zone)
         return (f"{symbol}: daily {bias} ({bias_q}) | ENTRY SENT ({quality}, RR {rr1:.2f})",
                 "long" if bias == "bullish" else "short")
 
@@ -457,6 +558,7 @@ def analyze(symbol, state):
 def main():
     state = load_state()
     statuses, fired = [], {}
+
     for s in SYMBOLS:
         try:
             line, direction = analyze(s, state)
@@ -468,46 +570,45 @@ def main():
         statuses.append(line)
         print(line)
 
-    if "EUR/USD" in fired and "USD/JPY" in fired:
-        if fired["EUR/USD"] != fired["USD/JPY"]:
-            send_telegram(
-                "⚠️ *Correlation warning*\n\n"
-                "EUR/USD and USD/JPY signalled opposite directions — that is the same "
-                "USD bet placed twice, so your real risk is doubled.\n\n"
-                f"Take one, or halve the lot size on each to keep total risk at {RISK_PERCENT}%."
-            )
+    if "EUR/USD" in fired and "USD/JPY" in fired and fired["EUR/USD"] != fired["USD/JPY"]:
+        send_telegram(
+            "⚠️ *Correlation warning*\n\n"
+            "EUR/USD and USD/JPY signalled opposite directions — that is the same "
+            "USD bet placed twice, so your real risk is doubled.\n\n"
+            f"Take one, or halve the lot size on each to keep total risk at {RISK_PERCENT}%."
+        )
 
-    if "USD/JPY" in fired and "EUR/JPY" in fired:
-        if fired["USD/JPY"] == fired["EUR/JPY"]:
-            send_telegram(
-                "⚠️ *Correlation warning*\n\n"
-                "USD/JPY and EUR/JPY signalled the same direction — both are yen bets, "
-                "so your real risk is doubled.\n\n"
-                "Take one, or halve the lot size on each."
-            )
+    if "USD/JPY" in fired and "EUR/JPY" in fired and fired["USD/JPY"] == fired["EUR/JPY"]:
+        send_telegram(
+            "⚠️ *Correlation warning*\n\n"
+            "USD/JPY and EUR/JPY signalled the same direction — both are yen bets.\n\n"
+            "Take one, or halve the lot size on each."
+        )
 
-    if "EUR/USD" in fired and "EUR/JPY" in fired:
-        if fired["EUR/USD"] == fired["EUR/JPY"]:
-            send_telegram(
-                "⚠️ *Correlation warning*\n\n"
-                "EUR/USD and EUR/JPY signalled the same direction — both are euro bets.\n\n"
-                "Take one, or halve the lot size on each."
-            )
+    if "EUR/USD" in fired and "EUR/JPY" in fired and fired["EUR/USD"] == fired["EUR/JPY"]:
+        send_telegram(
+            "⚠️ *Correlation warning*\n\n"
+            "EUR/USD and EUR/JPY signalled the same direction — both are euro bets.\n\n"
+            "Take one, or halve the lot size on each."
+        )
 
     save_state(state)
     now = datetime.now(timezone.utc)
+    open_n = len(state.get("open_trades", []))
 
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
         send_telegram(
             "🔎 *Manual check — current read*\n\n" + "\n".join(statuses) +
-            f"\n\n_{now.strftime('%a %d %b %H:%M')} UTC · Daily→4H→1H_"
+            f"\n\nTracking {open_n} open trade(s)"
+            f"\n_{now.strftime('%a %d %b %H:%M')} UTC · Daily→4H→1H_"
         )
 
     if now.hour == HEARTBEAT_UTC_HOUR and now.minute < HEARTBEAT_WINDOW_MIN:
         send_telegram(
             "✅ *Daily heartbeat — bot alive*\n\n" + "\n".join(statuses) +
-            f"\n\n_{now.strftime('%a %d %b %H:%M')} UTC · Daily→4H→1H · "
-            f"risk {RISK_PERCENT}%/trade on ${ACCOUNT_SIZE:,.0f}_"
+            f"\n\nTracking {open_n} open trade(s)"
+            f"\n_{now.strftime('%a %d %b %H:%M')} UTC · risk {RISK_PERCENT}%/trade "
+            f"on ${ACCOUNT_SIZE:,.0f}_"
         )
 
 
