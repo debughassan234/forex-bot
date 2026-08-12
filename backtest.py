@@ -1,17 +1,18 @@
 """
-Fib Structure Bot — BACKTEST ENGINE (matches v7.1 exactly)
+Fib Structure Bot — BACKTEST ENGINE v2
 
-Replays the live strategy over real history. Tests every combination of
-PIVOT_BIAS (2,3,4) x MIN_LEG_ATR (1.0-2.5) x MA fallback (on/off).
+Tests TWO strategy speeds head to head over real history:
+  SLOW = Daily -> 4H -> 1H     (what you run now)
+  FAST = 4H -> 1H -> 15min     (one gear lower, more setups)
 
-No lookahead: a swing is not "known" until pivot candles after it print.
-Entry at the next candle's open with spread deducted. If a bar touches
-both stop and target, the stop is assumed first.
+Across 8 pairs, with a KEEP/DROP verdict for each.
+Your fib settings are fixed: zone 0.382-0.618, SL beyond 1.0 + buffer,
+TP1 -0.382, TP2 -0.618. Only pivot, min_leg_atr and MA fallback are tuned.
 """
 
 import os
-import bisect
 import time
+import bisect
 import json
 import requests
 from datetime import datetime, timedelta
@@ -20,9 +21,20 @@ API_KEY = os.environ.get("TWELVE_DATA_API_KEY", "")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-SYMBOLS = ["XAU/USD", "EUR/USD", "USD/JPY", "GBP/JPY"]
+SYMBOLS = ["XAU/USD", "EUR/USD", "USD/JPY", "GBP/JPY",
+           "AUD/USD", "USD/CAD", "EUR/JPY", "XAG/USD"]
 
-COST = {"XAU/USD": 0.35, "EUR/USD": 0.00012, "USD/JPY": 0.015, "GBP/JPY": 0.025}
+COST = {"XAU/USD": 0.35, "EUR/USD": 0.00012, "USD/JPY": 0.015, "GBP/JPY": 0.025,
+        "AUD/USD": 0.00015, "USD/CAD": 0.00018, "EUR/JPY": 0.020, "XAG/USD": 0.020}
+
+SPEEDS = {
+    "SLOW (D->4H->1H)":   {"bias": "1day", "zone": "4h", "entry": "1h",
+                           "bias_n": 1500, "zone_n": 5000, "entry_n": 5000,
+                           "bars_max": 240},
+    "FAST (4H->1H->15m)": {"bias": "4h", "zone": "1h", "entry": "15min",
+                           "bias_n": 5000, "zone_n": 5000, "entry_n": 5000,
+                           "bars_max": 400},
+}
 
 ZONE_LOW, ZONE_HIGH, ZONE_PRIME = 0.382, 0.618, 0.5
 SL_BUFFER, TP1_EXT, TP2_EXT = 0.10, 0.382, 0.618
@@ -30,7 +42,6 @@ PIVOT_ENTRY = 2
 ZONE_LOOKBACK = 12
 MA_PERIOD = 50
 
-# --- v7.1 gates (must match the live bot exactly) ---
 MIN_RR   = 1.5
 ZONE_TOL = 0.10
 
@@ -238,14 +249,14 @@ def trigger_at(c1, hi1, lo1, t, zone, bias):
     return None
 
 
-def simulate(c1, entry_i, entry, sl, tp1, tp2, bias):
+def simulate(c1, entry_i, entry, sl, tp1, tp2, bias, bars_max=MAX_BARS_IN_TRADE):
     risk = abs(entry - sl)
     if risk <= 0:
         return None
     r1 = abs(tp1 - entry) / risk
     r2 = abs(tp2 - entry) / risk
     hit1 = False
-    for j in range(entry_i, min(entry_i + MAX_BARS_IN_TRADE, len(c1))):
+    for j in range(entry_i, min(entry_i + bars_max, len(c1))):
         h, l = c1[j]["h"], c1[j]["l"]
         if bias == "bullish":
             sl_hit, t1_hit, t2_hit = l <= sl, h >= tp1, h >= tp2
@@ -262,7 +273,7 @@ def simulate(c1, entry_i, entry, sl, tp1, tp2, bias):
         if t1_hit and not hit1:
             hit1 = True
     return {"tp1": r1 if hit1 else 0.0, "tp2": 0.0,
-            "split": 0.5 * r1 if hit1 else 0.0, "bars": MAX_BARS_IN_TRADE}
+            "split": 0.5 * r1 if hit1 else 0.0, "bars": bars_max}
 
 
 def map_index(src, target_times, lag):
@@ -284,13 +295,14 @@ def cached_swings(sym, tf, candles, pivot):
     return _SWCACHE[k]
 
 
-def run_combo(data, pivot, min_leg, allow_ma):
+def run_combo(data, pivot, min_leg, allow_ma, spec=None, bars_max=240):
+    spec = spec or {"bias": "1day", "zone": "4h", "entry": "1h"}
     trades = []
     for sym, d in data.items():
-        c1, c4, cd = d["1h"], d["4h"], d["1day"]
-        hi_d, lo_d = cached_swings(sym, "d", cd, pivot)
-        hi_4, lo_4 = cached_swings(sym, "4", c4, pivot)
-        hi_1, lo_1 = cached_swings(sym, "1", c1, PIVOT_ENTRY)
+        c1, c4, cd = d[spec["entry"]], d[spec["zone"]], d[spec["bias"]]
+        hi_d, lo_d = cached_swings(sym, spec["bias"], cd, pivot)
+        hi_4, lo_4 = cached_swings(sym, spec["zone"], c4, pivot)
+        hi_1, lo_1 = cached_swings(sym, spec["entry"] + "e", c1, PIVOT_ENTRY)
         idx_d, idx_4 = d["map_d"], d["map_4"]
         cost = COST[sym]
 
@@ -329,7 +341,8 @@ def run_combo(data, pivot, min_leg, allow_ma):
             if (abs(zone["tp1"] - entry) / risk) < MIN_RR:
                 continue
 
-            res = simulate(c1, t + 1, entry, zone["sl"], zone["tp1"], zone["tp2"], bias)
+            res = simulate(c1, t + 1, entry, zone["sl"], zone["tp1"], zone["tp2"],
+                           bias, bars_max)
             if res is None:
                 continue
             deep = (entry <= zone["z_prime"]) if bias == "bullish" else (entry >= zone["z_prime"])
@@ -362,109 +375,131 @@ def stats(trades, key="split"):
             "streak": worst, "maxdd": dd, "perweek": len(rs) / (span_days / 7.0)}
 
 
-def main():
-    print("Fetching history…")
-    data = {}
-    for sym in SYMBOLS:
-        d = {}
-        for iv, size in (("1day", 1500), ("4h", 5000), ("1h", 5000)):
-            c = fetch(sym, iv, size)
-            if not c:
-                break
-            d[iv] = c
-            time.sleep(8)
-        if len(d) != 3:
-            print(f"  {sym}: incomplete, skipped")
+def lag_for(interval):
+    return {"1day": timedelta(days=1), "4h": timedelta(hours=4),
+            "1h": timedelta(hours=1), "15min": timedelta(minutes=15)}[interval]
+
+
+def load_symbol(sym, spec):
+    d = {}
+    for key, size in (("bias", spec["bias_n"]), ("zone", spec["zone_n"]),
+                      ("entry", spec["entry_n"])):
+        iv = spec[key]
+        if iv in d:
             continue
-        times = [c["dt"] for c in d["1h"]]
-        d["map_d"] = map_index(d["1day"], times, timedelta(days=1))
-        d["map_4"] = map_index(d["4h"], times, timedelta(hours=4))
-        data[sym] = d
-        print(f"  {sym}: {len(d['1h'])} x 1H from {d['1h'][0]['dt'].date()} "
-              f"to {d['1h'][-1]['dt'].date()}")
+        c = fetch(sym, iv, size)
+        if not c:
+            return None
+        d[iv] = c
+        time.sleep(8)
+    times = [c["dt"] for c in d[spec["entry"]]]
+    d["map_d"] = map_index(d[spec["bias"]], times, lag_for(spec["bias"]))
+    d["map_4"] = map_index(d[spec["zone"]], times, lag_for(spec["zone"]))
+    return d
 
-    if not data:
-        print("No data. Check the API key.")
-        return
 
-    print("\nRunning grid…")
+def report(name, data, spec):
+    print("\n" + "#" * 64)
+    print(f"# {name}")
+    print("#" * 64)
+
     results = []
     for ma in GRID_MA:
         for p in GRID_PIVOT:
             for ml in GRID_MINLEG:
-                tr = run_combo(data, p, ml, ma)
+                tr = run_combo(data, p, ml, ma, spec, spec["bars_max"])
                 s = stats(tr)
                 if s:
                     s.update({"pivot": p, "minleg": ml, "ma": ma, "trades": tr})
                     results.append(s)
-                    print(f"  pivot={p} minleg={ml} ma={ma}: "
+                    print(f"  pivot={p} minleg={ml} ma={str(ma):5s}: "
                           f"{s['n']:4d} trades  win {s['win']:5.1f}%  "
-                          f"totR {s['totR']:+7.1f}  PF {s['pf']:.2f}  "
-                          f"streak {s['streak']}  {s['perweek']:.1f}/wk")
-
+                          f"totR {s['totR']:+7.1f}  PF {s['pf']:5.2f}  "
+                          f"streak {s['streak']:2d}  {s['perweek']:.1f}/wk")
     if not results:
-        print("No trades in any combination.")
-        return
+        print("  no trades in any combination")
+        return None
 
-    valid = [r for r in results if r["n"] >= 20]
-    pool = valid or results
+    pool = [r for r in results if r["n"] >= 20] or results
     best = max(pool, key=lambda r: r["totR"])
-
-    print("\n" + "=" * 62)
-    print(f"BEST: pivot={best['pivot']} min_leg_atr={best['minleg']} MA={best['ma']}")
-    print(f"  trades {best['n']} | win {best['win']:.1f}% | total {best['totR']:+.1f}R")
-    print(f"  avg {best['avgR']:+.2f}R | PF {best['pf']:.2f}")
-    print(f"  longest losing streak: {best['streak']}")
-    print(f"  max drawdown: {best['maxdd']:.1f}R  "
-          f"(= {best['maxdd'] * 0.5:.1f}% at 0.5% risk)")
-    print(f"  frequency: {best['perweek']:.1f} trades/week")
-
     tr = best["trades"]
-    for label, groups in (("BY SYMBOL", "sym"), ("BY GRADE", "grade"),
-                          ("BY TRIGGER", "trg")):
-        print(f"\n{label}")
-        keys = sorted(set(t[groups] for t in tr))
-        for k in keys:
-            s = stats([t for t in tr if t[groups] == k])
-            print(f"  {str(k):10s} n={s['n']:4d}  win {s['win']:5.1f}%  "
-                  f"totR {s['totR']:+7.1f}  avg {s['avgR']:+.2f}R")
 
-    print("\nDEEP ZONE (0.5-0.618) vs SHALLOW")
-    for k in (True, False):
-        s = stats([t for t in tr if t["deep"] == k])
-        if s:
-            print(f"  {'deep ' if k else 'shallow'}   n={s['n']:4d}  "
-                  f"win {s['win']:5.1f}%  avg {s['avgR']:+.2f}R")
+    print(f"\n  BEST: pivot={best['pivot']} min_leg_atr={best['minleg']} MA={best['ma']}")
+    print(f"    {best['n']} trades | win {best['win']:.1f}% | {best['totR']:+.1f}R "
+          f"| avg {best['avgR']:+.2f}R | PF {best['pf']:.2f}")
+    print(f"    longest losing streak {best['streak']} | "
+          f"max DD {best['maxdd']:.1f}R (~{best['maxdd']*0.5:.1f}% at 0.5% risk)")
+    print(f"    frequency {best['perweek']:.1f} trades/week")
 
-    print("\nWITH 4H CONFLUENCE vs WITHOUT")
-    for k in (True, False):
-        s = stats([t for t in tr if t["conf"] == k])
-        if s:
-            print(f"  {'yes' if k else 'no ':7s}   n={s['n']:4d}  "
-                  f"win {s['win']:5.1f}%  avg {s['avgR']:+.2f}R")
+    print("\n  BY SYMBOL (best combo)")
+    for k in sorted(set(t["sym"] for t in tr)):
+        s = stats([t for t in tr if t["sym"] == k])
+        flag = "KEEP" if s["totR"] > 0 else "DROP"
+        print(f"    {k:9s} n={s['n']:3d}  win {s['win']:5.1f}%  "
+              f"totR {s['totR']:+6.1f}  avg {s['avgR']:+.2f}R   <- {flag}")
 
-    print("\nEXIT STYLE COMPARISON (best combo)")
+    print("\n  BY GRADE")
+    for k in sorted(set(t["grade"] for t in tr)):
+        s = stats([t for t in tr if t["grade"] == k])
+        print(f"    {k:8s} n={s['n']:3d}  win {s['win']:5.1f}%  avg {s['avgR']:+.2f}R")
+
+    print("\n  EXIT STYLE")
     for style in ("tp1", "tp2", "split"):
         s = stats(tr, style)
-        print(f"  {style:6s} win {s['win']:5.1f}%  totR {s['totR']:+7.1f}  "
+        print(f"    {style:6s} win {s['win']:5.1f}%  totR {s['totR']:+7.1f}  "
               f"avg {s['avgR']:+.2f}R  PF {s['pf']:.2f}")
+    return best
+
+
+def main():
+    summary = {}
+    for name, spec in SPEEDS.items():
+        print(f"\nFetching data for {name}…")
+        data = {}
+        for sym in SYMBOLS:
+            d = load_symbol(sym, spec)
+            if d is None:
+                print(f"  {sym}: incomplete, skipped")
+                continue
+            data[sym] = d
+            e = d[spec["entry"]]
+            print(f"  {sym}: {len(e)} x {spec['entry']} "
+                  f"{e[0]['dt'].date()} -> {e[-1]['dt'].date()}")
+        if not data:
+            print("  no data for this speed")
+            continue
+        _SWCACHE.clear()
+        _KEYCACHE.clear()
+        best = report(name, data, spec)
+        if best:
+            summary[name] = best
+
+    if not summary:
+        print("\nNothing to compare.")
+        return
+
+    print("\n" + "=" * 64)
+    print("HEAD TO HEAD")
+    print("=" * 64)
+    for name, b in summary.items():
+        print(f"  {name:20s} {b['n']:4d} trades  {b['perweek']:4.1f}/wk  "
+              f"win {b['win']:5.1f}%  {b['totR']:+7.1f}R  "
+              f"avg {b['avgR']:+.2f}R  PF {b['pf']:.2f}  streak {b['streak']}")
 
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        msg = (f"📊 *Backtest complete*\n\n"
-               f"Best settings: pivot `{best['pivot']}`, "
-               f"min\\_leg\\_atr `{best['minleg']}`, MA fallback `{best['ma']}`\n\n"
-               f"Trades: {best['n']}  ({best['perweek']:.1f}/week)\n"
-               f"Win rate: {best['win']:.1f}%\n"
-               f"Total: {best['totR']:+.1f}R | avg {best['avgR']:+.2f}R\n"
-               f"Profit factor: {best['pf']:.2f}\n"
-               f"Longest losing streak: *{best['streak']}*\n"
-               f"Max drawdown: {best['maxdd']:.1f}R "
-               f"(≈{best['maxdd'] * 0.5:.1f}% at 0.5% risk)\n\n"
-               f"_Full breakdown in the Actions log._")
+        lines = ["📊 *Backtest — speed comparison*\n"]
+        for name, b in summary.items():
+            lines.append(
+                f"*{name}*\n"
+                f"pivot `{b['pivot']}` · leg `{b['minleg']}` · MA `{b['ma']}`\n"
+                f"{b['n']} trades ({b['perweek']:.1f}/wk) · win {b['win']:.1f}%\n"
+                f"{b['totR']:+.1f}R total · avg {b['avgR']:+.2f}R · PF {b['pf']:.2f}\n"
+                f"worst streak {b['streak']} · maxDD {b['maxdd']:.1f}R\n")
+        lines.append("_Per-pair breakdown in the Actions log._")
         try:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                json={"chat_id": TELEGRAM_CHAT_ID, "text": msg,
+                json={"chat_id": TELEGRAM_CHAT_ID, "text": "\n".join(lines),
                       "parse_mode": "Markdown"}, timeout=20)
         except Exception as e:
             print(f"[warn] telegram: {e}")
