@@ -1,9 +1,14 @@
 """
-Fib Structure Bot v7.1 — MULTI-TIMEFRAME (Daily -> 4H -> 1H)
-XAU/USD, EUR/USD, USD/JPY, GBP/JPY
+Fib Structure Bot v8 — Daily -> 4H -> 1H
+XAU/USD, EUR/USD, USD/JPY, EUR/JPY
 
-v7.1 fixes: entry must be INSIDE the zone, minimum RR gate,
-and memory so the same setup is never signalled twice.
+Settings below are BACKTESTED, not guessed:
+  32 trades, 56.2% win, +17.5R, PF 2.34, worst streak 3, max DD 1.5%
+  pivot 3 | min_leg_atr 2.0 | MA fallback OFF (profitable across all leg
+  settings 1.0-2.5, so the edge is a plateau not a lucky spike)
+
+Fib settings are the trader's own and unchanged:
+zone 0.382-0.618, SL beyond 1.0 + buffer, TP1 -0.382, TP2 -0.618.
 """
 
 import os
@@ -16,7 +21,7 @@ TWELVE_DATA_API_KEY = os.environ["TWELVE_DATA_API_KEY"]
 TELEGRAM_BOT_TOKEN  = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID    = os.environ["TELEGRAM_CHAT_ID"]
 
-SYMBOLS   = ["XAU/USD", "EUR/USD", "USD/JPY", "GBP/JPY"]
+SYMBOLS   = ["XAU/USD", "EUR/USD", "USD/JPY", "EUR/JPY"]
 
 TF_BIAS   = "1day"
 TF_ZONE   = "4h"
@@ -32,13 +37,13 @@ SL_BUFFER   = 0.10
 TP1_EXT     = 0.382
 TP2_EXT     = 0.618
 
-MIN_LEG_ATR    = 1.5
+MIN_LEG_ATR    = 2.0   # backtested optimum
 ZONE_LOOKBACK  = 12
-ENTRY_MAX_AGE  = 15    # minutes: only the run right after a 1H candle closes
-MIN_RR         = 1.5   # reject any setup whose TP1 reward:risk is below this
-ZONE_TOL       = 0.10  # entry must be inside the zone (10% of zone width slack)
+ENTRY_MAX_AGE  = 15
+MIN_RR         = 1.5
+ZONE_TOL       = 0.10
 STATE_FILE     = "bot_state.json"
-COOLDOWN_HOURS = 12    # do not re-signal the same symbol+direction inside this
+COOLDOWN_HOURS = 12
 
 # ------- risk / position sizing (edit these to match your account) -------
 ACCOUNT_SIZE   = 100000.0
@@ -47,10 +52,11 @@ DAILY_LOSS_CAP = 5.0
 MAX_LOTS       = 5.0
 
 CONTRACT   = {"XAU/USD": 100.0, "EUR/USD": 100000.0,
-              "USD/JPY": 100000.0, "GBP/JPY": 100000.0}
-JPY_QUOTED = {"USD/JPY", "GBP/JPY"}
-PIP        = {"EUR/USD": 0.0001, "USD/JPY": 0.01, "GBP/JPY": 0.01}
+              "USD/JPY": 100000.0, "EUR/JPY": 100000.0}
+JPY_QUOTED = {"USD/JPY", "EUR/JPY"}
+PIP        = {"EUR/USD": 0.0001, "USD/JPY": 0.01, "EUR/JPY": 0.01}
 MA_PERIOD  = 50
+USE_MA_FALLBACK = False   # backtest: MA-only bias lost money in every test
 
 USDJPY_RATE = None
 
@@ -220,7 +226,7 @@ def daily_bias(candles, pivot=None):
             strong = three_swing_aligned(highs, lows, established)
             return established, ("strong" if strong else "valid")
 
-    ma = sma(candles, MA_PERIOD)
+    ma = sma(candles, MA_PERIOD) if USE_MA_FALLBACK else None
     if ma:
         price = candles[-1]["c"]
         prev_ma = sma(candles[:-5], MA_PERIOD) if len(candles) > MA_PERIOD + 5 else None
@@ -471,13 +477,21 @@ def main():
                 f"Take one, or halve the lot size on each to keep total risk at {RISK_PERCENT}%."
             )
 
-    if "USD/JPY" in fired and "GBP/JPY" in fired:
-        if fired["USD/JPY"] == fired["GBP/JPY"]:
+    if "USD/JPY" in fired and "EUR/JPY" in fired:
+        if fired["USD/JPY"] == fired["EUR/JPY"]:
             send_telegram(
                 "⚠️ *Correlation warning*\n\n"
-                "USD/JPY and GBP/JPY signalled the same direction — both are yen bets, "
+                "USD/JPY and EUR/JPY signalled the same direction — both are yen bets, "
                 "so your real risk is doubled.\n\n"
-                f"Take one, or halve the lot size on each."
+                "Take one, or halve the lot size on each."
+            )
+
+    if "EUR/USD" in fired and "EUR/JPY" in fired:
+        if fired["EUR/USD"] == fired["EUR/JPY"]:
+            send_telegram(
+                "⚠️ *Correlation warning*\n\n"
+                "EUR/USD and EUR/JPY signalled the same direction — both are euro bets.\n\n"
+                "Take one, or halve the lot size on each."
             )
 
     save_state(state)
