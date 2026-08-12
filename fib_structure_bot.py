@@ -1,20 +1,16 @@
 """
-Fib Structure Bot v7 — MULTI-TIMEFRAME (Daily -> 4H -> 1H)
+Fib Structure Bot v7.1 — MULTI-TIMEFRAME (Daily -> 4H -> 1H)
 XAU/USD, EUR/USD, USD/JPY, GBP/JPY
 
-BIAS ENGINE (three layers):
-  1. PERSISTENCE  - trend holds until price CLOSES beyond the last HL/LH
-  2. THREE-SWING  - last 3 swings aligned = graded "strong"
-  3. MA TIEBREAK  - if structure is silent, 50-MA gives a "weak" bias
-
-Fib settings unchanged: zone 0.382-0.618, SL beyond 1.0 + buffer,
-TP1 -0.382 extension, TP2 -0.618 extension.
+v7.1 fixes: entry must be INSIDE the zone, minimum RR gate,
+and memory so the same setup is never signalled twice.
 """
 
 import os
+import json
 import time
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 TWELVE_DATA_API_KEY = os.environ["TWELVE_DATA_API_KEY"]
 TELEGRAM_BOT_TOKEN  = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -38,7 +34,11 @@ TP2_EXT     = 0.618
 
 MIN_LEG_ATR    = 1.5
 ZONE_LOOKBACK  = 12
-ENTRY_MAX_AGE  = 25
+ENTRY_MAX_AGE  = 15    # minutes: only the run right after a 1H candle closes
+MIN_RR         = 1.5   # reject any setup whose TP1 reward:risk is below this
+ZONE_TOL       = 0.10  # entry must be inside the zone (10% of zone width slack)
+STATE_FILE     = "bot_state.json"
+COOLDOWN_HOURS = 12    # do not re-signal the same symbol+direction inside this
 
 # ------- risk / position sizing (edit these to match your account) -------
 ACCOUNT_SIZE   = 100000.0
@@ -56,6 +56,41 @@ USDJPY_RATE = None
 
 HEARTBEAT_UTC_HOUR   = 7
 HEARTBEAT_WINDOW_MIN = 25
+
+
+def load_state():
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_state(state):
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=1)
+    except Exception as e:
+        print(f"[warn] could not save state: {e}")
+
+
+def already_sent(state, symbol, bias, zone):
+    rec = state.get(f"{symbol}|{bias}")
+    if not rec:
+        return False
+    try:
+        when = datetime.fromisoformat(rec["t"])
+    except Exception:
+        return False
+    if (datetime.now(timezone.utc) - when) > timedelta(hours=COOLDOWN_HOURS):
+        return False
+    width = max(zone["z_top"] - zone["z_bot"], 1e-9)
+    return abs(rec.get("z_bot", 0) - zone["z_bot"]) < 0.1 * width
+
+
+def mark_sent(state, symbol, bias, zone):
+    state[f"{symbol}|{bias}"] = {"t": datetime.now(timezone.utc).isoformat(),
+                                 "z_bot": zone["z_bot"], "z_top": zone["z_top"]}
 
 
 def get_candles(symbol, interval, size):
@@ -157,7 +192,6 @@ def three_swing_aligned(highs, lows, direction):
 
 
 def daily_bias(candles, pivot=None):
-    """Layered bias engine. Returns (direction, quality_label)."""
     pivot = PIVOT_BIAS if pivot is None else pivot
     highs, lows = find_swings(candles, pivot)
 
@@ -340,7 +374,7 @@ def armed_message(symbol, bias, zone, price, bias_q="valid"):
     )
 
 
-def analyze(symbol):
+def analyze(symbol, state):
     global USDJPY_RATE
     d = get_candles(symbol, TF_BIAS, N_BIAS)
     time.sleep(8)
@@ -380,13 +414,31 @@ def analyze(symbol):
     trigger, quality = one_hour_trigger(symbol, h1, zone, bias)
 
     if trigger and fresh:
+        width = max(zone["z_top"] - zone["z_bot"], 1e-9)
+        pad = ZONE_TOL * width
+        if not (zone["z_bot"] - pad <= price <= zone["z_top"] + pad):
+            return (f"{symbol}: daily {bias} ({bias_q}) | trigger fired but price "
+                    f"{fmt(symbol, price)} left the zone — skipped"), None
+
+        risk = abs(price - zone["sl"])
+        rr1 = (abs(zone["tp1"] - price) / risk) if risk > 0 else 0
+        if rr1 < MIN_RR:
+            return (f"{symbol}: daily {bias} ({bias_q}) | setup found but "
+                    f"RR {rr1:.2f} < {MIN_RR} — skipped"), None
+
+        if already_sent(state, symbol, bias, zone):
+            return (f"{symbol}: daily {bias} ({bias_q}) | same setup already "
+                    f"signalled — muted"), None
+
         send_telegram(entry_message(symbol, bias, zone, trigger, quality, price,
                                     bias_q, h4_q))
-        return (f"{symbol}: daily {bias} ({bias_q}) | ENTRY SENT ({quality})",
+        mark_sent(state, symbol, bias, zone)
+        return (f"{symbol}: daily {bias} ({bias_q}) | ENTRY SENT ({quality}, RR {rr1:.2f})",
                 "long" if bias == "bullish" else "short")
 
-    if in_zone_now and not prev_in_zone:
+    if in_zone_now and not prev_in_zone and not already_sent(state, symbol, "armed", zone):
         send_telegram(armed_message(symbol, bias, zone, price, bias_q))
+        mark_sent(state, symbol, "armed", zone)
         return f"{symbol}: daily {bias} ({bias_q}) | entered zone — awaiting 1H evidence", None
 
     if in_zone_now:
@@ -397,10 +449,11 @@ def analyze(symbol):
 
 
 def main():
+    state = load_state()
     statuses, fired = [], {}
     for s in SYMBOLS:
         try:
-            line, direction = analyze(s)
+            line, direction = analyze(s, state)
             if direction:
                 fired[s] = direction
         except Exception as e:
@@ -427,6 +480,7 @@ def main():
                 f"Take one, or halve the lot size on each."
             )
 
+    save_state(state)
     now = datetime.now(timezone.utc)
 
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
