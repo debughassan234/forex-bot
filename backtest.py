@@ -167,4 +167,528 @@ def atr_at(candles, upto, period=14):
     lo = max(1, upto - period + 1)
     trs = []
     for i in range(lo, upto + 1):
-        p, c =
+        p, c = candles[i - 1], candles[i]
+        trs.append(max(c["h"] - c["l"], abs(c["h"] - p["c"]), abs(c["l"] - p["c"])))
+    return sum(trs) / len(trs) if trs else 0.0
+
+
+def build_zone(bias, leg_hi, leg_lo, highs, lows):
+    leg = leg_hi - leg_lo
+    if bias == "bullish":
+        z_top = leg_hi - ZONE_LOW * leg
+        z_bot = leg_hi - ZONE_HIGH * leg
+        z_pr = leg_hi - ZONE_PRIME * leg
+        sl = leg_lo - SL_BUFFER * leg
+        tp1 = leg_hi + TP1_EXT * leg
+        tp2 = leg_hi + TP2_EXT * leg
+    else:
+        z_bot = leg_lo + ZONE_LOW * leg
+        z_top = leg_lo + ZONE_HIGH * leg
+        z_pr = leg_lo + ZONE_PRIME * leg
+        sl = leg_hi + SL_BUFFER * leg
+        tp1 = leg_lo - TP1_EXT * leg
+        tp2 = leg_lo - TP2_EXT * leg
+    prior = [p for _, p, _ in highs[:-1] + lows[:-1]]
+    conf = any(z_bot <= p <= z_top for p in prior)
+    return {"z_bot": z_bot, "z_top": z_top, "z_prime": z_pr,
+            "sl": sl, "tp1": tp1, "tp2": tp2, "confluence": conf}
+
+
+def zone_at(candles, hi, lo, upto, bias, min_leg_atr):
+    highs, lows = visible(hi, upto), visible(lo, upto)
+    if len(highs) < 2 or len(lows) < 2:
+        return None
+    a = atr_at(candles, upto)
+    if a <= 0:
+        return None
+
+    if bias == "bullish":
+        li, leg_lo, _ = lows[-1]
+        seg = candles[li: upto + 1]
+        if not seg:
+            return None
+        leg_hi = max(c["h"] for c in seg)
+    else:
+        hidx, leg_hi, _ = highs[-1]
+        seg = candles[hidx: upto + 1]
+        if not seg:
+            return None
+        leg_lo = min(c["l"] for c in seg)
+
+    if (leg_hi - leg_lo) < min_leg_atr * a:
+        return None
+    return build_zone(bias, leg_hi, leg_lo, highs, lows)
+
+
+def bos_zone_at(candles, hi, lo, upto, bias, min_leg_atr):
+    highs, lows = visible(hi, upto), visible(lo, upto)
+    if len(highs) < 2 or len(lows) < 2:
+        return None
+    a = atr_at(candles, upto)
+    if a <= 0:
+        return None
+
+    bos_i = None
+    if bias == "bullish":
+        for sh_i, sh_p, _ in reversed(highs):
+            for j in range(sh_i + 1, upto + 1):
+                if candles[j]["c"] > sh_p:
+                    bos_i = j
+                    break
+            if bos_i is not None:
+                break
+        if bos_i is None or (upto - bos_i) > BOS_MAX_AGE:
+            return None
+        prior_lows = [l for l in lows if l[0] < bos_i]
+        if not prior_lows:
+            return None
+        leg_lo = prior_lows[-1][1]
+        leg_hi = max(c["h"] for c in candles[bos_i: upto + 1])
+    else:
+        for sl_i, sl_p, _ in reversed(lows):
+            for j in range(sl_i + 1, upto + 1):
+                if candles[j]["c"] < sl_p:
+                    bos_i = j
+                    break
+            if bos_i is not None:
+                break
+        if bos_i is None or (upto - bos_i) > BOS_MAX_AGE:
+            return None
+        prior_highs = [h for h in highs if h[0] < bos_i]
+        if not prior_highs:
+            return None
+        leg_hi = prior_highs[-1][1]
+        leg_lo = min(c["l"] for c in candles[bos_i: upto + 1])
+
+    if (leg_hi - leg_lo) < min_leg_atr * a:
+        return None
+    return build_zone(bias, leg_hi, leg_lo, highs, lows)
+
+
+def trigger_at(c1, hi1, lo1, t, zone, bias):
+    z_bot, z_top = zone["z_bot"], zone["z_top"]
+    lo_i = max(0, t - ZONE_LOOKBACK + 1)
+    if not any(c["l"] <= z_top and c["h"] >= z_bot for c in c1[lo_i: t + 1]):
+        return None
+
+    highs, lows = visible(hi1, t), visible(lo1, t)
+    last, prev = c1[t], c1[t - 1]
+
+    if bias == "bullish" and highs:
+        si, sp, _ = highs[-1]
+        if last["c"] > sp and si >= t - ZONE_LOOKBACK:
+            return "structure"
+    if bias == "bearish" and lows:
+        si, sp, _ = lows[-1]
+        if last["c"] < sp and si >= t - ZONE_LOOKBACK:
+            return "structure"
+
+    if last["l"] <= z_top and last["h"] >= z_bot:
+        body = abs(last["c"] - last["o"])
+        rng = last["h"] - last["l"]
+        if rng > 0:
+            up = last["h"] - max(last["c"], last["o"])
+            dn = min(last["c"], last["o"]) - last["l"]
+            if bias == "bullish":
+                if (last["c"] > last["o"] and prev["c"] < prev["o"]
+                        and last["c"] > prev["o"] and last["o"] < prev["c"]):
+                    return "candle"
+                if dn > 2 * body and dn > 0.5 * rng:
+                    return "candle"
+            else:
+                if (last["c"] < last["o"] and prev["c"] > prev["o"]
+                        and last["c"] < prev["o"] and last["o"] > prev["c"]):
+                    return "candle"
+                if up > 2 * body and up > 0.5 * rng:
+                    return "candle"
+    return None
+
+
+def simulate(c1, entry_i, entry, sl, tp1, tp2, bias, bars_max=MAX_BARS_IN_TRADE):
+    risk = abs(entry - sl)
+    if risk <= 0:
+        return None
+    r1 = abs(tp1 - entry) / risk
+    r2 = abs(tp2 - entry) / risk
+    hit1 = False
+    for j in range(entry_i, min(entry_i + bars_max, len(c1))):
+        h, l = c1[j]["h"], c1[j]["l"]
+        if bias == "bullish":
+            sl_hit, t1_hit, t2_hit = l <= sl, h >= tp1, h >= tp2
+        else:
+            sl_hit, t1_hit, t2_hit = h >= sl, l <= tp1, l <= tp2
+        if sl_hit:
+            return {"tp1": r1 if hit1 else -1.0, "tp2": -1.0,
+                    "split": (0.5 * r1) if hit1 else -1.0, "bars": j - entry_i}
+        if t2_hit:
+            return {"tp1": r1, "tp2": r2,
+                    "split": 0.5 * r1 + 0.5 * r2, "bars": j - entry_i}
+        if t1_hit and not hit1:
+            hit1 = True
+    return {"tp1": r1 if hit1 else 0.0, "tp2": 0.0,
+            "split": 0.5 * r1 if hit1 else 0.0, "bars": bars_max}
+
+
+def map_index(src, target_times, lag):
+    out, j = [], -1
+    for t in target_times:
+        while j + 1 < len(src) and src[j + 1]["dt"] + lag <= t:
+            j += 1
+        out.append(j)
+    return out
+
+
+_SWCACHE = {}
+
+
+def cached_swings(sym, tf, candles, pivot):
+    k = (sym, tf, pivot)
+    if k not in _SWCACHE:
+        _SWCACHE[k] = swings(candles, pivot)
+    return _SWCACHE[k]
+
+
+def run_combo(data, pivot, min_leg, allow_ma, spec, bars_max, use_bos):
+    trades = []
+    for sym, d in data.items():
+        c1, c4, cd = d[spec["entry"]], d[spec["zone"]], d[spec["bias"]]
+        hi_d, lo_d = cached_swings(sym, spec["bias"], cd, pivot)
+        hi_4, lo_4 = cached_swings(sym, spec["zone"], c4, pivot)
+        hi_1, lo_1 = cached_swings(sym, spec["entry"] + "e", c1, PIVOT_ENTRY)
+        idx_d, idx_4 = d["map_d"], d["map_4"]
+        cost = COST[sym]
+
+        open_until = -1
+        for t in range(60, len(c1) - 2):
+            if t <= open_until:
+                continue
+            di, fi = idx_d[t], idx_4[t]
+            if di < 30 or fi < 40:
+                continue
+
+            bias, q = bias_at(cd, hi_d, lo_d, di, allow_ma)
+            if bias is None:
+                continue
+            b4, _ = bias_at(c4, hi_4, lo_4, fi, allow_ma)
+            if b4 != bias:
+                continue
+
+            zone = (bos_zone_at(c4, hi_4, lo_4, fi, bias, min_leg) if use_bos
+                    else zone_at(c4, hi_4, lo_4, fi, bias, min_leg))
+            if zone is None:
+                continue
+
+            trg = trigger_at(c1, hi_1, lo_1, t, zone, bias)
+            if trg is None:
+                continue
+
+            if USE_SESSION_FILTER:
+                hr = c1[t + 1]["dt"].hour
+                if not (SESSION_START_UTC <= hr < SESSION_END_UTC):
+                    continue
+
+            nxt = c1[t + 1]["o"]
+            entry = nxt + cost if bias == "bullish" else nxt - cost
+
+            width = max(zone["z_top"] - zone["z_bot"], 1e-9)
+            pad = ZONE_TOL * width
+            if not (zone["z_bot"] - pad <= entry <= zone["z_top"] + pad):
+                continue
+
+            risk = abs(entry - zone["sl"])
+            if risk <= 0:
+                continue
+            if (abs(zone["tp1"] - entry) / risk) < MIN_RR:
+                continue
+
+            res = simulate(c1, t + 1, entry, zone["sl"], zone["tp1"], zone["tp2"],
+                           bias, bars_max)
+            if res is None:
+                continue
+            deep = (entry <= zone["z_prime"]) if bias == "bullish" else (entry >= zone["z_prime"])
+            trades.append({"sym": sym, "grade": q, "trg": trg, "deep": deep,
+                           "dir": bias, "conf": zone["confluence"],
+                           "dt": c1[t + 1]["dt"], **res})
+            open_until = t + 1 + res["bars"]
+    return trades
+
+
+def stats(trades, key="split"):
+    if not trades:
+        return None
+    rs = [t[key] for t in trades]
+    wins = [r for r in rs if r > 0]
+    losses = [r for r in rs if r <= 0]
+    streak = worst = 0
+    for r in rs:
+        streak = streak + 1 if r <= 0 else 0
+        worst = max(worst, streak)
+    eq, peak, dd = 0.0, 0.0, 0.0
+    for r in rs:
+        eq += r
+        peak = max(peak, eq)
+        dd = max(dd, peak - eq)
+    gp = sum(wins)
+    gl = abs(sum(losses))
+    span = (max(t["dt"] for t in trades) - min(t["dt"] for t in trades)).days or 1
+    return {"n": len(rs), "win": 100.0 * len(wins) / len(rs), "totR": eq,
+            "avgR": eq / len(rs), "pf": (gp / gl) if gl else float("inf"),
+            "streak": worst, "maxdd": dd, "perweek": len(rs) / (span / 7.0)}
+
+
+def lag_for(interval):
+    return {"1day": timedelta(days=1), "4h": timedelta(hours=4),
+            "1h": timedelta(hours=1), "15min": timedelta(minutes=15),
+            "5min": timedelta(minutes=5)}[interval]
+
+
+def load_symbol(sym, spec):
+    d = {}
+    for key, size in (("bias", spec["bias_n"]), ("zone", spec["zone_n"]),
+                      ("entry", spec["entry_n"])):
+        iv = spec[key]
+        if iv in d:
+            continue
+        c = fetch(sym, iv, size)
+        if not c:
+            return None
+        d[iv] = c
+        time.sleep(8)
+    times = [c["dt"] for c in d[spec["entry"]]]
+    d["map_d"] = map_index(d[spec["bias"]], times, lag_for(spec["bias"]))
+    d["map_4"] = map_index(d[spec["zone"]], times, lag_for(spec["zone"]))
+    return d
+
+
+def trim_to_common_window(data, spec):
+    """Cut every instrument back to the date range they all cover."""
+    starts, ends = [], []
+    for d in data.values():
+        e = d[spec["entry"]]
+        starts.append(e[0]["dt"])
+        ends.append(e[-1]["dt"])
+    lo, hi = max(starts), min(ends)
+    days = (hi - lo).days
+    print(f"\n  Common window: {lo.date()} -> {hi.date()} ({days} days)")
+    if days < 60:
+        print("  !! The instruments barely overlap. Period matching is not")
+        print("     possible — the comparison would NOT be like-for-like.")
+        return None
+
+    out = {}
+    for sym, d in data.items():
+        nd = {}
+        for key in ("bias", "zone", "entry"):
+            iv = spec[key]
+            if iv in nd:
+                continue
+            nd[iv] = [c for c in d[iv] if lo <= c["dt"] <= hi]
+        if len(nd[spec["entry"]]) < 200 or len(nd[spec["bias"]]) < 40:
+            print(f"    {sym}: only {len(nd[spec['entry']])} entry bars "
+                  f"in window — skipped")
+            continue
+        times = [c["dt"] for c in nd[spec["entry"]]]
+        nd["map_d"] = map_index(nd[spec["bias"]], times, lag_for(spec["bias"]))
+        nd["map_4"] = map_index(nd[spec["zone"]], times, lag_for(spec["zone"]))
+        out[sym] = nd
+        print(f"    {sym}: {len(nd[spec['entry']])} entry bars")
+    return out
+
+
+def direction_split(trades, label):
+    """Is the edge real, or just a long-only bull market?"""
+    print(f"\n  {label}")
+    for side in ("bullish", "bearish"):
+        s = stats([t for t in trades if t.get("dir") == side])
+        if s:
+            print(f"    {side:8s} n={s['n']:3d}  win {s['win']:5.1f}%  "
+                  f"totR {s['totR']:+6.1f}  avg {s['avgR']:+.2f}R")
+        else:
+            print(f"    {side:8s} no trades")
+    longs = stats([t for t in trades if t.get("dir") == "bullish"])
+    shorts = stats([t for t in trades if t.get("dir") == "bearish"])
+    if longs and shorts:
+        if shorts["avgR"] <= 0 < longs["avgR"]:
+            print("    -> LONG ONLY: shorts lose. This looks like a bull-market")
+            print("       artifact, not a two-sided edge.")
+        elif longs["avgR"] > 0 and shorts["avgR"] > 0:
+            print("    -> both directions profitable: genuine two-sided edge")
+    elif longs and not shorts:
+        print("    -> only long trades exist — cannot verify a two-sided edge")
+
+
+def report(name, data, spec):
+    print("\n" + "#" * 66)
+    print(f"# {name}")
+    print("#" * 66)
+
+    results = []
+    for bos in GRID_BOS:
+        for ma in GRID_MA:
+            for p in GRID_PIVOT:
+                for ml in GRID_MINLEG:
+                    tr = run_combo(data, p, ml, ma, spec, spec["bars_max"], bos)
+                    s = stats(tr)
+                    if s:
+                        s.update({"pivot": p, "minleg": ml, "bos": bos, "trades": tr})
+                        results.append(s)
+                        print(f"\n  pivot={p} minleg={ml}: "
+                              f"{s['n']} trades  win {s['win']:.1f}%  "
+                              f"totR {s['totR']:+.1f}  PF {s['pf']:.2f}  "
+                              f"streak {s['streak']}  {s['perweek']:.1f}/wk")
+                    else:
+                        print(f"\n  pivot={p} minleg={ml}: no trades")
+    if not results:
+        print("  no trades")
+        return None, []
+
+    best = max(results, key=lambda r: r["totR"])
+    tr = best["trades"]
+
+    print(f"    avg {best['avgR']:+.2f}R | max DD {best['maxdd']:.1f}R "
+          f"(~{best['maxdd']*0.5:.1f}% at 0.5% risk)")
+
+    print("\n  EXIT STYLE")
+    for style in ("tp1", "tp2", "split"):
+        s = stats(tr, style)
+        print(f"    {style:6s} win {s['win']:5.1f}%  totR {s['totR']:+7.1f}  "
+              f"avg {s['avgR']:+.2f}R  PF {s['pf']:.2f}")
+
+    print("\n" + "=" * 74)
+    print("  PAIR SCREENING — do the index ETFs earn a place?")
+    print("=" * 74)
+    rows = [(sym, stats([t for t in tr if t["sym"] == sym])) for sym in SYMBOLS]
+    rows.sort(key=lambda r: (r[1]["totR"] if r[1] else -999), reverse=True)
+
+    print(f"\n  settings: pivot {best['pivot']}, leg {best['minleg']}, MA off\n")
+    print(f"  {'symbol':10s} {'status':10s} {'n':>4s} {'win%':>6s} "
+          f"{'totR':>7s} {'avgR':>7s}  verdict")
+    keepers = list(CURRENT)
+    for sym, s in rows:
+        status = "current" if sym in CURRENT else "candidate"
+        if s is None:
+            print(f"  {sym:10s} {status:10s} {'-':>4s} {'-':>6s} {'-':>7s} "
+                  f"{'-':>7s}  no data / no trades")
+            continue
+        if s["n"] < 8:
+            verdict = "TOO FEW TRADES - ignore"
+        elif s["totR"] > 0 and s["avgR"] >= 0.30:
+            verdict = "ADD" if sym not in CURRENT else "KEEP"
+            if sym not in CURRENT:
+                keepers.append(sym)
+        elif s["totR"] > 0:
+            verdict = "marginal - skip"
+        else:
+            verdict = "REJECT" if sym not in CURRENT else "DROP"
+        print(f"  {sym:10s} {status:10s} {s['n']:4d} {s['win']:6.1f} "
+              f"{s['totR']:+7.1f} {s['avgR']:+7.2f}  {verdict}")
+
+    print(f"\n  Suggested SYMBOLS list: {keepers}")
+    print("  (a candidate needs 8+ trades, positive totR and avgR >= +0.30R)")
+
+    print("\n" + "=" * 74)
+    print("  DIRECTION SPLIT — real edge or bull market?")
+    print("=" * 74)
+    direction_split([t for t in tr if t["sym"] in CANDIDATES], "index ETFs")
+    direction_split([t for t in tr if t["sym"] in CURRENT], "forex + gold")
+
+    idx_days = {}
+    for t in tr:
+        if t["sym"] in CANDIDATES:
+            idx_days.setdefault(t["dt"].date(), []).append(t["sym"])
+    clash = {d: v for d, v in idx_days.items() if len(v) > 1}
+    if idx_days:
+        print("\n  INDEX OVERLAP")
+        print(f"    {len(clash)} of {len(idx_days)} index signal-days "
+              f"had 2+ indices firing together")
+        for d, v in list(clash.items())[:5]:
+            print(f"      {d}: {', '.join(v)}")
+        print("    (indices move together — simultaneous signals are ONE bet)")
+
+    cur = stats([t for t in tr if t["sym"] in CURRENT])
+    new = stats([t for t in tr if t["sym"] in keepers])
+    if cur and new:
+        print(f"\n  current four : {cur['n']:3d} trades  {cur['totR']:+6.1f}R  "
+              f"avg {cur['avgR']:+.2f}R  {cur['perweek']:.1f}/wk")
+        print(f"  suggested set: {new['n']:3d} trades  {new['totR']:+6.1f}R  "
+              f"avg {new['avgR']:+.2f}R  {new['perweek']:.1f}/wk")
+        if new["avgR"] < cur["avgR"] - 0.05:
+            print("  -> expanding DILUTES the edge. Stay with four.")
+        elif new["perweek"] > cur["perweek"] * 1.3:
+            print("  -> expanding adds frequency without hurting quality.")
+        else:
+            print("  -> roughly neutral; no strong reason to change.")
+
+    print("\n  CHALLENGE MATH (0.5% risk per trade)")
+    if best["avgR"] > 0:
+        weeks = (10.0 / (best["avgR"] * 0.5)) / best["perweek"]
+        need = int(10.0 / (best["avgR"] * 0.5))
+        print(f"    avg {best['avgR']:+.2f}R = {best['avgR']*0.5:+.2f}% per trade")
+        print(f"    10% target needs ~{need} net trades = ~{weeks:.0f} weeks")
+    print(f"    worst drawdown: {best['maxdd']*0.5:.1f}% (FundedNext kills at 10%)")
+    print(f"    worst streak: {best['streak']} = {best['streak']*0.5:.1f}% in one day")
+    return best, results
+
+
+def main():
+    summary = {}
+    for name, spec in SPEEDS.items():
+        print(f"\nFetching data for {name}...")
+        data = {}
+        for sym in SYMBOLS:
+            d = load_symbol(sym, spec)
+            if d is None:
+                print(f"  {sym}: incomplete, skipped")
+                continue
+            data[sym] = d
+            e = d[spec["entry"]]
+            print(f"  {sym}: {len(e)} x {spec['entry']} "
+                  f"{e[0]['dt'].date()} -> {e[-1]['dt'].date()}")
+        if not data:
+            print("  no data")
+            continue
+
+        if MATCH_PERIODS and len(data) > 1:
+            trimmed = trim_to_common_window(data, spec)
+            if trimmed:
+                data = trimmed
+            else:
+                print("  proceeding untrimmed — read results with care")
+
+        _SWCACHE.clear()
+        _KEYCACHE.clear()
+        best, results = report(name, data, spec)
+        if best:
+            summary[name] = (best, results)
+
+    if not summary:
+        print("\nNothing to report.")
+        return
+
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        lines = ["*Backtest — ETFs, period matched*\n"]
+        for name, (best, results) in summary.items():
+            tr = best["trades"]
+            adds = []
+            for sym in CANDIDATES:
+                s = stats([t for t in tr if t["sym"] == sym])
+                if s and s["n"] >= 8 and s["totR"] > 0 and s["avgR"] >= 0.30:
+                    adds.append(f"{sym} ({s['totR']:+.1f}R, avg {s['avgR']:+.2f})")
+            cur = stats([t for t in tr if t["sym"] in CURRENT])
+            if cur:
+                lines.append(f"Current four: {cur['n']} trades · {cur['totR']:+.1f}R · "
+                             f"avg {cur['avgR']:+.2f}R\n")
+            lines.append("*ETFs that passed:*\n" +
+                         ("\n".join(adds) if adds else "none") + "\n")
+        lines.append("_Direction split in the Actions log._")
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={"chat_id": TELEGRAM_CHAT_ID, "text": "\n".join(lines),
+                      "parse_mode": "Markdown"}, timeout=20)
+        except Exception as e:
+            print(f"[warn] telegram: {e}")
+
+
+if __name__ == "__main__":
+    main()
