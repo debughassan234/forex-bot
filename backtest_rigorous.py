@@ -1,15 +1,4 @@
-"""Fib BOS Strategy — RIGOROUS BACKTEST (OANDA deep history)
-
-  1. DEEP HISTORY   OANDA pages back to 2015
-  2. IS / OOS SPLIT first 60% tunes, last 40% is reported
-  3. NEWS BLACKOUT  skips NFP windows
-  4. MFE / MAE      how far each trade ran before closing, and against you
-  5. ATTRIBUTION    R by year, month, instrument, direction, grade
-  6. SCREENING      silver + 3 indices tested against the current four
-
-Strategy LOCKED to v10: Daily -> 4H BOS -> 1H evidence,
-pivot 3, min_leg_atr 2.0, MA off, zone 0.382-0.618, TP1 -0.382, TP2 -0.618.
-"""
+"""Fib BOS Strategy — RIGOROUS BACKTEST (OANDA deep history)"""
 
 import os
 import time
@@ -327,7 +316,7 @@ def map_index(src, times, lag):
             j += 1
         out.append(j)
     return out
-
+  
 
 def run(data):
     trades = []
@@ -417,7 +406,7 @@ def target_study(trades):
     if not trades:
         return
     n = len(trades)
-    print("\n  TARGET STUDY — how far trades actually ran (MFE in R)")
+    print("\n  TARGET STUDY - how far trades actually ran (MFE in R)")
     for b in (0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0):
         reached = sum(1 for t in trades if t["mfe"] >= b)
         print(f"    reached {b:>4.1f}R : {reached:4d} / {n}  "
@@ -435,7 +424,7 @@ def target_study(trades):
         print(f"    TP at {tgt:>4.1f}R : {tot:+7.1f}R  "
               f"win {100.0*wins/n:5.1f}%  avg {tot/n:+.2f}R")
 
-    print("\n  STOP STUDY — how far trades went against you first (MAE in R)")
+    print("\n  STOP STUDY - how far trades went against you first (MAE in R)")
     for b in (0.25, 0.5, 0.75, 1.0):
         under = sum(1 for t in trades if t["mae"] <= b)
         print(f"    MAE stayed under {b:>4.2f}R : {under:4d} / {n}  "
@@ -469,7 +458,7 @@ def attribution(trades):
             print(f"    {names[m-1]}  n={s['n']:4d}  win {s['win']:5.1f}%  "
                   f"{s['totR']:+7.1f}R  avg {s['avgR']:+.2f}R")
 
-    print("\n  R BY INSTRUMENT  (out-of-sample screening)")
+    print("\n  R BY INSTRUMENT  (screening)")
     print(f"    {'symbol':12s} {'status':10s} {'n':>4s} {'win%':>6s} "
           f"{'totR':>8s} {'avgR':>7s}  verdict")
     keepers = []
@@ -495,7 +484,7 @@ def attribution(trades):
               f"{s['totR']:+8.1f} {s['avgR']:+7.2f}  {verdict}")
     adds = [s for s in keepers if s in CANDIDATES]
     print(f"\n    candidates that passed: {adds if adds else 'none'}")
-    print("    (needs 15+ out-of-sample trades and avg >= +0.30R)")
+    print("    (needs 15+ trades and avg >= +0.30R)")
 
     print("\n  R BY DIRECTION")
     for side in ("bullish", "bearish"):
@@ -514,10 +503,6 @@ def attribution(trades):
 
 def main():
     print(f"Data source: {DATA_SOURCE}")
-    if DATA_SOURCE == "twelve":
-        print("  NOTE: free Twelve Data caps history at ~7 months of 1H bars.")
-        print("  Add an OANDA_API_KEY secret to reach 2015.\n")
-
     data = {}
     for sym in SYMBOLS:
         d, ok = {}, True
@@ -562,38 +547,34 @@ def main():
     print()
     show("in-sample (tuning)", stats(ins))
     show("OUT-OF-SAMPLE", stats(oos))
-    print("\n  Only the out-of-sample line is an honest estimate. The in-sample")
-    print("  number is contaminated: the settings were chosen knowing it.")
+    print("\n  Only the out-of-sample line is an honest estimate.")
 
     s_in, s_out = stats(ins), stats(oos)
     if s_in and s_out:
         drop = s_out["avgR"] - s_in["avgR"]
-        print(f"\n  degradation in-sample -> out-of-sample: {drop:+.2f}R per trade")
+        print(f"\n  degradation IS -> OOS: {drop:+.2f}R per trade")
         if s_out["avgR"] <= 0:
             print("  -> OUT-OF-SAMPLE LOSES MONEY. The edge did not hold up.")
         elif drop < -0.25:
-            print("  -> large degradation: the settings are likely curve-fit.")
+            print("  -> large degradation: settings are likely curve-fit.")
         else:
             print("  -> holds up reasonably. This is the number to believe.")
 
     print("\n" + "=" * 78)
-    print(f"  ATTRIBUTION — out-of-sample only ({len(oos)} trades)")
+    print(f"  ATTRIBUTION - out-of-sample ({len(oos)} trades)")
     print("=" * 78)
     attribution(oos if len(oos) >= 20 else all_trades)
 
     print("\n" + "=" * 78)
-    print("  MFE / MAE — are the targets and stops in the right place?")
+    print("  MFE / MAE - are targets and stops in the right place?")
     print("=" * 78)
     target_study(oos if len(oos) >= 20 else all_trades)
 
     print("\n" + "=" * 78)
     print("  NEWS BLACKOUT")
     print("=" * 78)
-    print(f"  NFP blackout: {'ON' if USE_NEWS_BLACKOUT else 'OFF'} "
-          f"(+/-{NFP_BLACKOUT_HOURS}h around first Friday 13:30 UTC)")
-    print(f"  US data window: {'ON' if BLACKOUT_US_WINDOW else 'OFF'} "
-          f"({US_DATA_WINDOW[0]}:00-{US_DATA_WINDOW[1]}:00 UTC)")
-    print("  Flip BLACKOUT_US_WINDOW and re-run to compare.")
+    print(f"  NFP blackout: {'ON' if USE_NEWS_BLACKOUT else 'OFF'}")
+    print(f"  US data window: {'ON' if BLACKOUT_US_WINDOW else 'OFF'}")
 
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID and s_out:
         msg = (f"*Rigorous backtest*\n\n"
@@ -602,10 +583,15 @@ def main():
                f"avg {s_out['avgR']:+.2f}R · PF {s_out['pf']:.2f}\n"
                f"worst streak {s_out['streak']} · maxDD {s_out['maxdd']:.1f}R\n\n"
                f"in-sample avg was {s_in['avgR']:+.2f}R\n\n"
-               f"_Attribution and MFE study in the Actions log._")
+               f"_Full detail in the Actions log._")
         try:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
                 json={"chat_id": TELEGRAM_CHAT_ID, "text": msg,
                       "parse_mode": "Markdown"}, timeout=20)
-        except Exception as
+        except Exception as e:
+            print(f"[warn] telegram: {e}")
+
+
+if __name__ == "__main__":
+    main()
