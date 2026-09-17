@@ -1,4 +1,7 @@
-"""Fib BOS Strategy — RIGOROUS BACKTEST (OANDA deep history)"""
+"""Fib BOS — ZONE / STOP / TARGET SWEEP
+Twelve complete geometries tested on XAU, EUR/USD, USD/JPY, EUR/JPY, XAG.
+2015-2026 via OANDA, in-sample / out-of-sample split, MFE/MAE, attribution.
+"""
 
 import os
 import time
@@ -15,11 +18,27 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 DATA_SOURCE = os.environ.get("DATA_SOURCE", "oanda" if OANDA_KEY else "twelve")
 
 CURRENT = ["XAU/USD", "EUR/USD", "USD/JPY", "EUR/JPY"]
-CANDIDATES = ["XAG/USD", "SPX500_USD", "NAS100_USD", "US30_USD"]
+CANDIDATES = ["XAG/USD"]
 SYMBOLS = CURRENT + CANDIDATES
 
-COST = {"XAU/USD": 0.35, "EUR/USD": 0.00012, "USD/JPY": 0.015, "EUR/JPY": 0.020,
-        "XAG/USD": 0.020, "SPX500_USD": 0.6, "NAS100_USD": 2.5, "US30_USD": 3.0}
+COST = {"XAU/USD": 0.35, "EUR/USD": 0.00012, "USD/JPY": 0.015,
+        "EUR/JPY": 0.020, "XAG/USD": 0.020}
+
+# zone = entry band · stop = "leg" / "0886" / "atr" · target = "ext" / "r1" / "r2"
+VARIANTS = [
+    ("current 0.382-0.618 | leg stop | ext",   (0.382, 0.618), "leg",  "ext"),
+    ("current zone | leg stop | 1R",           (0.382, 0.618), "leg",  "r1"),
+    ("current zone | leg stop | 2R",           (0.382, 0.618), "leg",  "r2"),
+    ("deep 0.5-0.786 | leg stop | ext",        (0.500, 0.786), "leg",  "ext"),
+    ("deep 0.5-0.786 | 0.886 stop | ext",      (0.500, 0.786), "0886", "ext"),
+    ("deep 0.5-0.786 | 0.886 stop | 2R",       (0.500, 0.786), "0886", "r2"),
+    ("deeper 0.618-0.786 | 0.886 stop | ext",  (0.618, 0.786), "0886", "ext"),
+    ("deeper 0.618-0.786 | 0.886 stop | 2R",   (0.618, 0.786), "0886", "r2"),
+    ("shallow 0.236-0.5 | leg stop | ext",     (0.236, 0.500), "leg",  "ext"),
+    ("wide 0.382-0.786 | 0.886 stop | ext",    (0.382, 0.786), "0886", "ext"),
+    ("current zone | ATR stop | 2R",           (0.382, 0.618), "atr",  "r2"),
+    ("deep 0.5-0.786 | ATR stop | 2R",         (0.500, 0.786), "atr",  "r2"),
+]
 
 START_DATE = datetime(2015, 1, 1)
 OOS_FRACTION = 0.40
@@ -207,7 +226,8 @@ def is_continuation(candles, hi, lo, upto, bias):
     return any(candles[j]["c"] < sl_p for j in range(sl_i + 1, upto + 1))
 
 
-def zone_at(candles, hi, lo, upto, bias):
+def zone_at(candles, hi, lo, upto, bias, zlow=ZONE_LOW, zhigh=ZONE_HIGH,
+            stop_mode="leg"):
     highs, lows = visible(hi, upto), visible(lo, upto)
     if len(highs) < 2 or len(lows) < 2:
         return None
@@ -229,15 +249,30 @@ def zone_at(candles, hi, lo, upto, bias):
     leg = leg_hi - leg_lo
     if leg < MIN_LEG_ATR * a:
         return None
+
     if bias == "bullish":
-        return {"z_bot": leg_hi - ZONE_HIGH * leg, "z_top": leg_hi - ZONE_LOW * leg,
-                "z_prime": leg_hi - ZONE_PRIME * leg,
-                "sl": leg_lo - SL_BUFFER * leg,
-                "tp1": leg_hi + TP1_EXT * leg, "tp2": leg_hi + TP2_EXT * leg}
-    return {"z_bot": leg_lo + ZONE_LOW * leg, "z_top": leg_lo + ZONE_HIGH * leg,
-            "z_prime": leg_lo + ZONE_PRIME * leg,
-            "sl": leg_hi + SL_BUFFER * leg,
-            "tp1": leg_lo - TP1_EXT * leg, "tp2": leg_lo - TP2_EXT * leg}
+        z_bot, z_top = leg_hi - zhigh * leg, leg_hi - zlow * leg
+        if stop_mode == "leg":
+            sl = leg_lo - SL_BUFFER * leg
+        elif stop_mode == "0886":
+            sl = leg_hi - 0.886 * leg
+        else:
+            sl = z_bot - 1.5 * a
+        return {"z_bot": z_bot, "z_top": z_top,
+                "z_prime": leg_hi - ZONE_PRIME * leg, "sl": sl,
+                "tp1": leg_hi + TP1_EXT * leg, "tp2": leg_hi + TP2_EXT * leg,
+                "leg": leg}
+    z_bot, z_top = leg_lo + zlow * leg, leg_lo + zhigh * leg
+    if stop_mode == "leg":
+        sl = leg_hi + SL_BUFFER * leg
+    elif stop_mode == "0886":
+        sl = leg_lo + 0.886 * leg
+    else:
+        sl = z_top + 1.5 * a
+    return {"z_bot": z_bot, "z_top": z_top,
+            "z_prime": leg_lo + ZONE_PRIME * leg, "sl": sl,
+            "tp1": leg_lo - TP1_EXT * leg, "tp2": leg_lo - TP2_EXT * leg,
+            "leg": leg}
 
 
 def trigger_at(c1, hi1, lo1, t, zone, bias):
@@ -276,11 +311,19 @@ def trigger_at(c1, hi1, lo1, t, zone, bias):
     return None
 
 
-def simulate(c1, i0, entry, sl, tp1, tp2, bias):
+def simulate(c1, i0, entry, sl, tp1, tp2, bias, tmode="ext"):
     risk = abs(entry - sl)
     if risk <= 0:
         return None
-    r1, r2 = abs(tp1 - entry) / risk, abs(tp2 - entry) / risk
+    if tmode == "ext":
+        r1, r2 = abs(tp1 - entry) / risk, abs(tp2 - entry) / risk
+    else:
+        flat = {"r1": 1.0, "r15": 1.5, "r2": 2.0}[tmode]
+        r1 = r2 = flat
+        if bias == "bullish":
+            tp1 = tp2 = entry + flat * risk
+        else:
+            tp1 = tp2 = entry - flat * risk
     hit1 = False
     mfe = mae = 0.0
 
@@ -316,9 +359,9 @@ def map_index(src, times, lag):
             j += 1
         out.append(j)
     return out
-  
+        
 
-def run(data):
+def run(data, zlow, zhigh, stop_mode, tmode):
     trades = []
     for sym, d in data.items():
         c1, c4, cd = d["1h"], d["4h"], d["1day"]
@@ -343,7 +386,7 @@ def run(data):
                 continue
             if not is_continuation(c4, hi_4, lo_4, fi, bias):
                 continue
-            zone = zone_at(c4, hi_4, lo_4, fi, bias)
+            zone = zone_at(c4, hi_4, lo_4, fi, bias, zlow, zhigh, stop_mode)
             if zone is None:
                 continue
             if trigger_at(c1, hi_1, lo_1, t, zone, bias) is None:
@@ -359,11 +402,13 @@ def run(data):
             if not (zone["z_bot"] - pad <= entry <= zone["z_top"] + pad):
                 continue
             risk = abs(entry - zone["sl"])
-            if risk <= 0 or (abs(zone["tp1"] - entry) / risk) < MIN_RR:
+            if risk <= 0:
+                continue
+            if tmode == "ext" and (abs(zone["tp1"] - entry) / risk) < MIN_RR:
                 continue
 
             res = simulate(c1, t + 1, entry, zone["sl"], zone["tp1"],
-                           zone["tp2"], bias)
+                           zone["tp2"], bias, tmode)
             if res is None:
                 continue
             trades.append({"sym": sym, "dir": bias, "grade": q, "dt": when,
@@ -393,47 +438,24 @@ def stats(trades):
             "streak": worst, "maxdd": dd, "permonth": len(rs) / (span / 30.0)}
 
 
-def show(tag, s):
-    if not s:
-        print(f"  {tag:24s} no trades")
-        return
-    print(f"  {tag:24s} {s['n']:4d} trades  {s['permonth']:4.1f}/mo  "
-          f"win {s['win']:5.1f}%  {s['totR']:+7.1f}R  avg {s['avgR']:+.2f}R  "
-          f"PF {s['pf']:5.2f}  streak {s['streak']:2d}  maxDD {s['maxdd']:.1f}R")
-
-
 def target_study(trades):
     if not trades:
         return
     n = len(trades)
-    print("\n  TARGET STUDY - how far trades actually ran (MFE in R)")
-    for b in (0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0):
+    print("\n  TARGET STUDY - how far trades ran (MFE in R)")
+    for b in (0.5, 1.0, 1.5, 2.0, 2.5, 3.0):
         reached = sum(1 for t in trades if t["mfe"] >= b)
-        print(f"    reached {b:>4.1f}R : {reached:4d} / {n}  "
+        print(f"    reached {b:>4.1f}R : {reached:4d} / {n} "
               f"({100.0*reached/n:5.1f}%)")
-
-    print("\n  If every trade had used a single flat target:")
-    for tgt in (1.0, 1.5, 2.0, 2.5, 3.0):
-        tot = wins = 0
-        for t in trades:
-            if t["mfe"] >= tgt and t["mae"] < 1.0:
-                tot += tgt
-                wins += 1
-            else:
-                tot += -1.0
-        print(f"    TP at {tgt:>4.1f}R : {tot:+7.1f}R  "
-              f"win {100.0*wins/n:5.1f}%  avg {tot/n:+.2f}R")
-
-    print("\n  STOP STUDY - how far trades went against you first (MAE in R)")
+    print("\n  STOP STUDY - how far against you first (MAE in R)")
     for b in (0.25, 0.5, 0.75, 1.0):
         under = sum(1 for t in trades if t["mae"] <= b)
-        print(f"    MAE stayed under {b:>4.2f}R : {under:4d} / {n}  "
+        print(f"    MAE under {b:>4.2f}R : {under:4d} / {n} "
               f"({100.0*under/n:5.1f}%)")
     winners = [t for t in trades if t["R"] > 0]
     if winners:
-        wm = sum(t["mae"] for t in winners) / len(winners)
-        print(f"    average MAE on winning trades: {wm:.2f}R")
-        print("    -> a stop tighter than this would have killed winners")
+        print(f"    average MAE on winners: "
+              f"{sum(t['mae'] for t in winners)/len(winners):.2f}R")
 
 
 def attribution(trades):
@@ -446,58 +468,21 @@ def attribution(trades):
         print(f"    {y}  n={s['n']:4d}  win {s['win']:5.1f}%  "
               f"{s['totR']:+7.1f}R  avg {s['avgR']:+.2f}R")
 
-    print("\n  R BY MONTH (calendar month, all years pooled)")
-    by_m = defaultdict(list)
-    for t in trades:
-        by_m[t["dt"].month].append(t)
-    names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-             "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    for m in range(1, 13):
-        if m in by_m:
-            s = stats(by_m[m])
-            print(f"    {names[m-1]}  n={s['n']:4d}  win {s['win']:5.1f}%  "
-                  f"{s['totR']:+7.1f}R  avg {s['avgR']:+.2f}R")
-
-    print("\n  R BY INSTRUMENT  (screening)")
-    print(f"    {'symbol':12s} {'status':10s} {'n':>4s} {'win%':>6s} "
-          f"{'totR':>8s} {'avgR':>7s}  verdict")
-    keepers = []
+    print("\n  R BY INSTRUMENT")
     for sym in SYMBOLS:
         s = stats([t for t in trades if t["sym"] == sym])
-        status = "current" if sym in CURRENT else "candidate"
-        if not s:
-            print(f"    {sym:12s} {status:10s} {'-':>4s} {'-':>6s} "
-                  f"{'-':>8s} {'-':>7s}  no trades")
-            continue
-        if s["n"] < 15:
-            verdict = "too few trades"
-        elif s["avgR"] >= 0.30:
-            verdict = "ADD" if sym in CANDIDATES else "KEEP"
-            keepers.append(sym)
-        elif s["avgR"] > 0:
-            verdict = "marginal - skip"
-            if sym in CURRENT:
-                keepers.append(sym)
+        tag = "current" if sym in CURRENT else "candidate"
+        if s:
+            print(f"    {sym:9s} {tag:10s} n={s['n']:4d}  win {s['win']:5.1f}%  "
+                  f"{s['totR']:+7.1f}R  avg {s['avgR']:+.2f}R")
         else:
-            verdict = "REJECT" if sym in CANDIDATES else "DROP"
-        print(f"    {sym:12s} {status:10s} {s['n']:4d} {s['win']:6.1f} "
-              f"{s['totR']:+8.1f} {s['avgR']:+7.2f}  {verdict}")
-    adds = [s for s in keepers if s in CANDIDATES]
-    print(f"\n    candidates that passed: {adds if adds else 'none'}")
-    print("    (needs 15+ trades and avg >= +0.30R)")
+            print(f"    {sym:9s} {tag:10s} no trades")
 
     print("\n  R BY DIRECTION")
     for side in ("bullish", "bearish"):
         s = stats([t for t in trades if t["dir"] == side])
         if s:
             print(f"    {side:8s} n={s['n']:4d}  win {s['win']:5.1f}%  "
-                  f"{s['totR']:+7.1f}R  avg {s['avgR']:+.2f}R")
-
-    print("\n  R BY SETUP GRADE")
-    for g in ("strong", "valid"):
-        s = stats([t for t in trades if t["grade"] == g])
-        if s:
-            print(f"    {g:8s} n={s['n']:4d}  win {s['win']:5.1f}%  "
                   f"{s['totR']:+7.1f}R  avg {s['avgR']:+.2f}R")
 
 
@@ -529,61 +514,70 @@ def main():
         print("No data.")
         return
 
-    all_trades = run(data)
-    if not all_trades:
-        print("\nNo trades produced.")
+    print("\n" + "=" * 98)
+    print("  ZONE / STOP / TARGET SWEEP")
+    print("  IS = tuning half, OOS = honest half. A variant must win BOTH.")
+    print("=" * 98)
+    print(f"\n  {'variant':42s} {'n':>5s} {'IS avgR':>9s} {'OOS n':>6s} "
+          f"{'OOS avgR':>9s} {'OOS totR':>9s} {'win%':>6s} {'PF':>5s} {'maxDD':>7s}")
+    print("  " + "-" * 96)
+
+    rows = []
+    for name, (zl, zh), smode, tmode in VARIANTS:
+        tr = run(data, zl, zh, smode, tmode)
+        if not tr:
+            print(f"  {name:42s} {'no trades':>5s}")
+            continue
+        k = int(len(tr) * (1 - OOS_FRACTION))
+        si, so = stats(tr[:k]), stats(tr[k:])
+        if not so or not si:
+            continue
+        rows.append((name, si, so, tr))
+        print(f"  {name:42s} {len(tr):5d} {si['avgR']:+9.3f} {so['n']:6d} "
+              f"{so['avgR']:+9.3f} {so['totR']:+9.1f} {so['win']:6.1f} "
+              f"{so['pf']:5.2f} {so['maxdd']:7.1f}")
+
+    if not rows:
+        print("\n  No variant produced trades.")
         return
 
-    split_i = int(len(all_trades) * (1 - OOS_FRACTION))
-    ins, oos = all_trades[:split_i], all_trades[split_i:]
+    print("\n" + "=" * 98)
+    print("  VERDICT")
+    print("=" * 98)
+    both = [r for r in rows if r[1]["avgR"] > 0 and r[2]["avgR"] > 0
+            and r[2]["n"] >= 100]
+    print(f"  variants tested               : {len(rows)}")
+    print(f"  positive out-of-sample        : "
+          f"{sum(1 for r in rows if r[2]['avgR'] > 0)}")
+    print(f"  positive in BOTH halves, 100+ : {len(both)}")
 
-    print("\n" + "=" * 78)
-    print("  IN-SAMPLE vs OUT-OF-SAMPLE")
-    print("=" * 78)
-    if ins:
-        print(f"  in-sample : {ins[0]['dt'].date()} -> {ins[-1]['dt'].date()}")
-    if oos:
-        print(f"  out-sample: {oos[0]['dt'].date()} -> {oos[-1]['dt'].date()}")
-    print()
-    show("in-sample (tuning)", stats(ins))
-    show("OUT-OF-SAMPLE", stats(oos))
-    print("\n  Only the out-of-sample line is an honest estimate.")
+    if not both:
+        print("\n  -> NO geometry works. The zone is not the problem. The")
+        print("     structure filter plus retracement entry has no edge on")
+        print("     these instruments over 11 years.")
+        best = max(rows, key=lambda r: r[2]["avgR"])
+    else:
+        best = max(both, key=lambda r: r[2]["avgR"])
+        print(f"\n  -> Best consistent: {best[0]}")
+        print(f"     IS {best[1]['avgR']:+.3f}R · OOS {best[2]['avgR']:+.3f}R "
+              f"over {best[2]['n']} trades · PF {best[2]['pf']:.2f}")
+        print("     CAUTION: 12 variants were tested. One looking good by")
+        print("     chance is expected. Treat as a hypothesis, not a finding.")
 
-    s_in, s_out = stats(ins), stats(oos)
-    if s_in and s_out:
-        drop = s_out["avgR"] - s_in["avgR"]
-        print(f"\n  degradation IS -> OOS: {drop:+.2f}R per trade")
-        if s_out["avgR"] <= 0:
-            print("  -> OUT-OF-SAMPLE LOSES MONEY. The edge did not hold up.")
-        elif drop < -0.25:
-            print("  -> large degradation: settings are likely curve-fit.")
-        else:
-            print("  -> holds up reasonably. This is the number to believe.")
+    oos_tr = best[3][int(len(best[3]) * (1 - OOS_FRACTION)):]
+    print(f"\n  Detail for: {best[0]}")
+    attribution(oos_tr)
+    target_study(oos_tr)
 
-    print("\n" + "=" * 78)
-    print(f"  ATTRIBUTION - out-of-sample ({len(oos)} trades)")
-    print("=" * 78)
-    attribution(oos if len(oos) >= 20 else all_trades)
-
-    print("\n" + "=" * 78)
-    print("  MFE / MAE - are targets and stops in the right place?")
-    print("=" * 78)
-    target_study(oos if len(oos) >= 20 else all_trades)
-
-    print("\n" + "=" * 78)
-    print("  NEWS BLACKOUT")
-    print("=" * 78)
-    print(f"  NFP blackout: {'ON' if USE_NEWS_BLACKOUT else 'OFF'}")
-    print(f"  US data window: {'ON' if BLACKOUT_US_WINDOW else 'OFF'}")
-
-    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID and s_out:
-        msg = (f"*Rigorous backtest*\n\n"
-               f"*OUT-OF-SAMPLE* ({len(oos)} trades)\n"
-               f"win {s_out['win']:.1f}% · {s_out['totR']:+.1f}R · "
-               f"avg {s_out['avgR']:+.2f}R · PF {s_out['pf']:.2f}\n"
-               f"worst streak {s_out['streak']} · maxDD {s_out['maxdd']:.1f}R\n\n"
-               f"in-sample avg was {s_in['avgR']:+.2f}R\n\n"
-               f"_Full detail in the Actions log._")
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        s_in, s_out = best[1], best[2]
+        msg = (f"*Zone sweep — 12 geometries*\n\n"
+               f"Best: {best[0]}\n"
+               f"OOS {s_out['n']} trades · win {s_out['win']:.1f}% · "
+               f"avg {s_out['avgR']:+.3f}R · PF {s_out['pf']:.2f}\n"
+               f"IS avg was {s_in['avgR']:+.3f}R\n\n"
+               f"{len(both)} of {len(rows)} variants positive in both halves\n\n"
+               f"_Full table in the Actions log._")
         try:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
@@ -595,3 +589,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+        
