@@ -27,6 +27,7 @@ TARGET1, TARGET2 = 8.0, 5.0
 DAILY_LOSS, MAX_LOSS = 5.0, 10.0
 MIN_DAYS = 5
 HORIZON_MONTHS = 24          # stop watching a challenge after 2 years
+SIM_START = datetime.strptime(os.environ.get("SIM_START") or "2015-01-01", "%Y-%m-%d")
 FEE_6K = 59.99
 
 LOG = []
@@ -42,7 +43,7 @@ def load_trades():
     for sym in B.SYMBOLS:
         d = {}
         for iv in ("1day", "4h", "1h"):
-            c = B.fetch_oanda(sym, iv)
+            c = B.fetch_oanda(sym, iv, SIM_START)
             if not c or len(c) < 200:
                 d = None
                 break
@@ -106,7 +107,8 @@ def main():
         out("No trades — check OANDA_API_KEY.")
         return finish()
     s = B.stats(trades)
-    out(f"\n  bot trades 2015-2026: {s['n']}  avg {s['avgR']:+.3f}R  win {s['win']:.1f}%  "
+    out(f"\n  period: {SIM_START:%Y-%m-%d} -> now")
+    out(f"  bot trades: {s['n']}  avg {s['avgR']:+.3f}R  win {s['win']:.1f}%  "
         f"{s['permonth']:.1f}/month")
     gold = [t for t in trades if t["sym"] == "XAU/USD"]
 
@@ -160,7 +162,7 @@ def finish():
         try:
             B.requests.post(f"https://api.telegram.org/bot{B.TELEGRAM_BOT_TOKEN}/sendMessage",
                             json={"chat_id": B.TELEGRAM_CHAT_ID,
-                                  "text": "FundedNext 2-Step simulation\n\n" + body},
+                                  "text": f"FundedNext 2-Step simulation from {SIM_START:%Y}\n\n" + body},
                             timeout=20)
         except Exception as e:
             print(f"[warn] telegram: {e}")

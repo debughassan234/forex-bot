@@ -2,6 +2,10 @@ name: Backtest - FundedNext 2-Step simulation
 
 on:
   workflow_dispatch:
+    inputs:
+      start:
+        description: 'First date of data (YYYY-MM-DD)'
+        default: '2015-01-01'
 
 permissions:
   contents: write
@@ -18,6 +22,7 @@ jobs:
       - run: pip install requests
       - run: python prop_sim.py
         env:
+          SIM_START: ${{ inputs.start }}
           OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
