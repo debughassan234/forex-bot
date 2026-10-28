@@ -1,0 +1,27 @@
+FUNDEDNEXT STELLAR 2-STEP SIMULATION · run 2026-10-28 11:56 UTC
+  XAU/USD: 40363 x 1h  2020-01-01 -> 2026-10-28
+  EUR/USD: 42485 x 1h  2020-01-01 -> 2026-10-28
+  USD/JPY: 42486 x 1h  2020-01-01 -> 2026-10-28
+  EUR/JPY: 42476 x 1h  2020-01-01 -> 2026-10-28
+
+  period: 2020-01-01 -> now
+  bot trades: 234  avg +0.007R  win 33.3%  2.9/month
+
+  ALL 4 PAIRS (the live bot): 234 trades, avg +0.007R, 2.9/month, 57 monthly start dates
+  risk/trade  PASSED failed P1 failed P2 daily-loss unfinished median time cost per pass
+        0.5%    0.0%      0.0%      0.0%       0.0%     100.0%           -         never
+        1.0%    0.0%      0.0%      0.0%       0.0%     100.0%           -         never
+        1.5%    3.5%     14.0%     21.1%       0.0%      61.4%     11.9 mo        $1,710
+        2.0%   22.8%     43.9%     31.6%       0.0%       1.8%      8.9 mo          $263
+
+  GOLD ONLY: 71 trades, avg +0.030R, 0.9/month, 57 monthly start dates
+  risk/trade  PASSED failed P1 failed P2 daily-loss unfinished median time cost per pass
+        0.5%    0.0%      0.0%      0.0%       0.0%     100.0%           -         never
+        1.0%    0.0%      0.0%      0.0%       0.0%     100.0%           -         never
+        1.5%    0.0%      7.0%      0.0%       0.0%      93.0%           -         never
+        2.0%    0.0%     15.8%     17.5%       0.0%      66.7%           -         never
+
+  How to read: each row starts a fresh challenge at the start of every month
+  from 2015 and follows the bot's real trades. 'unfinished' = neither passed nor
+  failed within 24 months. 'cost per pass' = $6K fee / pass rate.
+  Start dates overlap in time, so treat the percentages as rough odds.
