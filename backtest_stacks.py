@@ -377,7 +377,9 @@ def run_stack(data, stack, mode):
                            bias, max_bars)
             if res is None:
                 continue
-            trades.append({"sym": sym, "dir": bias, "dt": when, "R": res["R"]})
+            exit_dt = ct[min(t + 1 + res["bars"], len(ct) - 1)]["dt"] + TF[t_tf]
+            trades.append({"sym": sym, "dir": bias, "dt": when, "exit": exit_dt,
+                           "R": res["R"]})
             busy = t + 1 + res["bars"]
     return sorted(trades, key=lambda x: x["dt"])
 
