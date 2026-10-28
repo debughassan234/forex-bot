@@ -1,0 +1,36 @@
+TIMEFRAME STACK TEST  ·  run 2026-10-28 09:17 UTC
+  XAU/USD: 279501 x 15m, 70029 x 1h  2015-01-01 -> 2026-10-28
+  EUR/USD: 294073 x 15m, 73532 x 1h  2015-01-01 -> 2026-10-28
+  USD/JPY: 294093 x 15m, 73549 x 1h  2015-01-01 -> 2026-10-28
+  EUR/JPY: 294041 x 15m, 73524 x 1h  2015-01-01 -> 2026-10-28
+
+  stack                      mode          n  IS avg  OOS n  OOS avg   OOS R  win%    PF   DD R   /mo
+  ----------------------------------------------------------------------------------------------------
+  A  Daily > 4H > 1H         standard    399  -0.146    160   +0.029    +4.7  35.0  1.05    9.3   2.8   (2s)
+  A  Daily > 4H > 1H         strict       82  -0.456     33   -0.342   -11.3  21.2  0.53   13.3   0.6   (2s)
+  B  4H > 1H > 15m           standard   1457  -0.112    583   -0.035   -20.3  33.6  0.95   42.3  10.2   (29s)
+  B  4H > 1H > 15m           strict      265  -0.094    106   +0.025    +2.7  34.9  1.04   14.2   1.9   (31s)
+  C  Daily > 4H > 1H > 15m   standard    475  -0.111    190   +0.035    +6.6  36.3  1.06   16.2   3.3   (9s)
+  C  Daily > 4H > 1H > 15m   strict       65  -0.485     26   +0.130    +3.4  38.5  1.23    5.0   0.5   (7s)
+
+  OUT-OF-SAMPLE BY INSTRUMENT (avg R per trade)
+  A  standard  XAUUSD +0.20(48)  EURUSD +0.06(45)  USDJPY -0.21(34)  EURJPY -0.00(33)
+  A  strict    XAUUSD -0.19(13)  EURUSD -0.57(8)  USDJPY -0.38(8)  EURJPY -0.32(4)
+  B  standard  XAUUSD -0.00(165)  EURUSD +0.07(139)  USDJPY -0.13(142)  EURJPY -0.09(137)
+  B  strict    XAUUSD -0.13(38)  EURUSD +0.19(22)  USDJPY -0.17(26)  EURJPY +0.39(20)
+  C  standard  XAUUSD +0.24(59)  EURUSD +0.13(49)  USDJPY -0.31(43)  EURJPY -0.02(39)
+  C  strict    XAUUSD +0.47(9)  EURUSD +0.18(5)  USDJPY -0.24(5)  EURJPY -0.08(7)
+
+  OUT-OF-SAMPLE BY YEAR (total R)
+  A  standard  2021:-0  2022:+9  2023:-7  2024:+1  2025:+3  2026:-1
+  A  strict    2021:-4  2022:-1  2023:-4  2024:-1  2025:-3  2026:+2
+  B  standard  2022:-17  2023:+15  2024:+8  2025:-29  2026:+3
+  B  strict    2022:-10  2023:+10  2024:+16  2025:-9  2026:-4
+  C  standard  2022:+5  2023:-7  2024:+4  2025:+8  2026:-3
+  C  strict    2021:+0  2022:+3  2023:-1  2024:+1  2025:-2  2026:+2
+
+  VERDICT
+  combinations tested            : 6
+  positive out-of-sample         : 4
+  positive in BOTH halves, 100+  : 0
+  -> none of the stacks has an edge in both halves.
