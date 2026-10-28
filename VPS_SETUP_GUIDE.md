@@ -53,9 +53,7 @@ is no longer used.
    - OANDA API token (practice)
 5. At the end you get a **🔎 Manual check** message on Telegram.
    That means it works. You can close Termius — the server keeps running.
-6. Now switch off GitHub's own schedule so you don't get every signal twice:
-   tell Claude "the server is working", or do it yourself:
-   GitHub → **Actions** → **Fib Structure Signals** → **⋯** → **Disable workflow**.
+6. GitHub's own schedule is now switched off, so signals only come from the server.
 
 ---
 
