@@ -228,7 +228,10 @@ def get_candles(symbol, interval, size):
                                 "l": float(m["l"]), "c": float(m["c"]),
                                 "complete": bool(cd.get("complete"))})
                 return out or None
-            print(f"[warn] {symbol} {interval}: HTTP {r.status_code} {r.text[:150]}")
+            body = r.text.strip()
+            detail = ("OANDA server busy, retrying" if body.startswith("<")
+                      else " ".join(body.split())[:120])
+            print(f"[warn] {symbol} {interval}: HTTP {r.status_code} - {detail}")
             if r.status_code in (400, 401, 403, 404):
                 return None          # bad key or symbol: retrying won't help
         except Exception as e:

@@ -54,8 +54,16 @@ echo
 
 echo "4. Price data (OANDA)"
 blk=$(awk '/^=== /{b=""} {b=b $0 "\n"} END{printf "%s", b}' "$LOG" 2>/dev/null)
-if echo "$blk" | grep -q "data unavailable"; then bad "OANDA data missing — the OANDA token may be wrong or expired"
-else ok "all pairs read normally"; fi
+miss=$(echo "$blk" | grep -c "data unavailable")
+if [ "$miss" -eq 0 ]; then ok "all pairs read normally"
+elif echo "$blk" | grep -qE "HTTP (401|403)"; then bad "OANDA rejected the token — make a new practice token and rerun setup"
+elif [ "$miss" -ge 4 ]; then bad "no price data for any pair — OANDA may be down; check again in a few minutes"
+else echo "  ℹ️  $miss pair(s) skipped this minute (OANDA busy) — normal if it happens now and then"; fi
+since60=$(date -u -d '60 min ago' '+%Y-%m-%d %H:%M:%S')
+hiccups=$(awk -v s="$since60" '/^=== /{t=substr($0,5,19)} t>=s && /HTTP 5[0-9][0-9]/' "$LOG" 2>/dev/null | wc -l)
+gaps=$(awk -v s="$since60" '/^=== /{t=substr($0,5,19)} t>=s && /data unavailable/' "$LOG" 2>/dev/null | wc -l)
+if [ "$hiccups" -eq 0 ]; then ok "no OANDA server hiccups in the last hour"
+else echo "  ℹ️  OANDA server hiccups in the last hour: $hiccups (retried automatically); pair-minutes skipped: $gaps"; fi
 errs=$(tail -n 2000 "$LOG" 2>/dev/null | grep -cE "Traceback|\[error\]")
 if [ "$errs" -eq 0 ]; then ok "no crashes in recent runs"
 else bad "$errs error line(s) recently:"; tail -n 2000 "$LOG" | grep -E "Traceback|\[error\]" | tail -2 | sed 's/^/       /'; fi
