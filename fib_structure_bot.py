@@ -1,5 +1,5 @@
 """
-Fib Structure Bot v10 — Daily -> 4H -> 1H
+Fib Structure Bot v11 — Daily -> 4H -> 1H (OANDA data, VPS)
 XAU/USD, EUR/USD, USD/JPY, EUR/JPY
 
 Backtested settings (pivot 3 | min_leg_atr 2.0 | MA fallback OFF).
@@ -12,17 +12,37 @@ beyond the previous swing before a setup qualifies.
 
 Fib settings are the trader's own and unchanged:
 zone 0.382-0.618, SL beyond 1.0 + buffer, TP1 -0.382, TP2 -0.618.
+
+v11 (VPS edition):
+  - price data from OANDA (free practice API, no daily call limit) instead
+    of Twelve Data. Same candle source as the 11-year backtest.
+  - ACCOUNT_SIZE 5000 (FundedNext 5K).
+  - built to run every minute on a VPS: one heartbeat per day,
+    TP/SL tracking no longer expires trades early on frequent runs.
+  - `python3 fib_structure_bot.py --report` sends a status read
+    without sending or recording any signals.
 """
 
 import os
+import sys
 import json
+import math
 import time
 import requests
 from datetime import datetime, timedelta, timezone
 
-TWELVE_DATA_API_KEY = os.environ["TWELVE_DATA_API_KEY"]
-TELEGRAM_BOT_TOKEN  = os.environ["TELEGRAM_BOT_TOKEN"]
-TELEGRAM_CHAT_ID    = os.environ["TELEGRAM_CHAT_ID"]
+OANDA_API_KEY      = os.environ["OANDA_API_KEY"]
+OANDA_ENV          = os.environ.get("OANDA_ENV", "practice")   # "practice" or "live"
+TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+TELEGRAM_CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
+
+OANDA_HOST = ("https://api-fxtrade.oanda.com" if OANDA_ENV == "live"
+              else "https://api-fxpractice.oanda.com")
+OANDA_GRAN = {"1day": "D", "4h": "H4", "1h": "H1"}
+
+# --report (or a manual GitHub run): status only, no signals sent or saved
+REPORT_ONLY = ("--report" in sys.argv
+               or os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch")
 
 SYMBOLS   = ["XAU/USD", "EUR/USD", "USD/JPY", "EUR/JPY"]
 
@@ -48,11 +68,12 @@ ZONE_TOL       = 0.10
 STATE_FILE     = "bot_state.json"
 COOLDOWN_HOURS = 12
 
+# ---- TP/SL hit alerts ----
 TRACK_TRADES   = True
-TRACK_MAX_BARS = 240
+TRACK_MAX_HOURS = 240    # ~10 days before an untouched trade is abandoned
 
 # ------- risk / position sizing (edit these to match your account) -------
-ACCOUNT_SIZE   = 100000.0
+ACCOUNT_SIZE   = 5000.0   # FundedNext Stellar 5K
 RISK_PERCENT   = 0.5
 DAILY_LOSS_CAP = 5.0
 MAX_LOTS       = 5.0
@@ -66,10 +87,10 @@ USE_MA_FALLBACK = False  # backtest: MA-only bias lost money in every test
 
 USDJPY_RATE = None
 
-HEARTBEAT_UTC_HOUR   = 7
-HEARTBEAT_WINDOW_MIN = 25
+HEARTBEAT_UTC_HOUR   = 7     # 8am Lagos time; sent once per day
 
 
+# ---------------------------------------------------------------- state
 def load_state():
     try:
         with open(STATE_FILE) as f:
@@ -105,7 +126,9 @@ def mark_sent(state, symbol, bias, zone):
                                  "z_bot": zone["z_bot"], "z_top": zone["z_top"]}
 
 
+# ------------------------------------------------- TP / SL hit tracking
 def track_add(state, symbol, bias, price, zone):
+    """Remember a signal so its TP/SL outcome can be reported."""
     if not TRACK_TRADES:
         return
     trades = state.setdefault("open_trades", [])
@@ -113,13 +136,14 @@ def track_add(state, symbol, bias, price, zone):
         "sym": symbol, "dir": bias,
         "opened": datetime.now(timezone.utc).isoformat(),
         "entry": price, "sl": zone["sl"], "tp1": zone["tp1"], "tp2": zone["tp2"],
-        "hit_tp1": False, "bars": 0,
+        "hit_tp1": False,
     })
     if len(trades) > 50:
         state["open_trades"] = trades[-50:]
 
 
 def track_update(state, symbol, candles):
+    """Resolve open trades against new candles. Returns the ones that closed."""
     if not TRACK_TRADES or not candles:
         return []
 
@@ -140,6 +164,8 @@ def track_update(state, symbol, candles):
         r2 = abs(tr["tp2"] - tr["entry"]) / risk
         done = None
 
+        # candles are re-scanned from the open each run (the TP1 flag is
+        # remembered), so frequent runs no longer age trades too fast
         for c in candles:
             try:
                 ct = datetime.strptime(c["t"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
@@ -147,7 +173,6 @@ def track_update(state, symbol, candles):
                 continue
             if ct <= opened:
                 continue
-            tr["bars"] += 1
 
             if tr["dir"] == "bullish":
                 sl_hit = c["l"] <= tr["sl"]
@@ -167,7 +192,8 @@ def track_update(state, symbol, candles):
             if t1_hit and not tr["hit_tp1"]:
                 tr["hit_tp1"] = True
 
-        if done is None and tr["bars"] > TRACK_MAX_BARS:
+        age_h = (datetime.now(timezone.utc) - opened).total_seconds() / 3600.0
+        if done is None and age_h > TRACK_MAX_HOURS:
             done = ("expired", round(0.5 * r1, 2) if tr["hit_tp1"] else 0.0)
 
         if done:
@@ -180,18 +206,35 @@ def track_update(state, symbol, candles):
     return closed
 
 
+# ---------------------------------------------------------------- data
 def get_candles(symbol, interval, size):
-    url = (f"https://api.twelvedata.com/time_series?symbol={symbol}"
-           f"&interval={interval}&outputsize={size}&apikey={TWELVE_DATA_API_KEY}")
-    data = requests.get(url, timeout=25).json()
-    try:
-        vals = data["values"]
-        vals.reverse()
-        return [{"t": v["datetime"], "o": float(v["open"]), "h": float(v["high"]),
-                 "l": float(v["low"]), "c": float(v["close"])} for v in vals]
-    except (KeyError, TypeError):
-        print(f"[warn] {symbol} {interval}: {data.get('message', data)}")
-        return None
+    """OANDA mid-price candles, oldest first. Like Twelve Data, the last
+    candle is the one still forming, so candles[-1]["c"] is the live price
+    and candles[-2] is the last closed candle. Times are candle OPEN times
+    in UTC. Default OANDA alignment (same as the backtest)."""
+    inst = symbol.replace("/", "_")
+    params = {"granularity": OANDA_GRAN[interval], "count": size, "price": "M"}
+    headers = {"Authorization": f"Bearer {OANDA_API_KEY}"}
+    for attempt in range(3):
+        try:
+            r = requests.get(f"{OANDA_HOST}/v3/instruments/{inst}/candles",
+                             headers=headers, params=params, timeout=25)
+            if r.status_code == 200:
+                out = []
+                for cd in r.json().get("candles", []):
+                    m = cd["mid"]
+                    out.append({"t": cd["time"][:19].replace("T", " "),
+                                "o": float(m["o"]), "h": float(m["h"]),
+                                "l": float(m["l"]), "c": float(m["c"]),
+                                "complete": bool(cd.get("complete"))})
+                return out or None
+            print(f"[warn] {symbol} {interval}: HTTP {r.status_code} {r.text[:150]}")
+            if r.status_code in (400, 401, 403, 404):
+                return None          # bad key or symbol: retrying won't help
+        except Exception as e:
+            print(f"[warn] {symbol} {interval}: {e}")
+        time.sleep(2 * (attempt + 1))
+    return None
 
 
 def find_swings(candles, pivot):
@@ -238,6 +281,9 @@ def candle_age_minutes(candles):
 
 
 def send_telegram(msg):
+    if os.environ.get("DRY_RUN"):
+        print("---- telegram (dry run) ----\n" + msg + "\n----------------------------")
+        return
     try:
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
                       json={"chat_id": TELEGRAM_CHAT_ID, "text": msg,
@@ -258,9 +304,20 @@ def lot_size(symbol, sl_distance, price):
         per_lot_loss = per_lot_loss / rate
     if per_lot_loss <= 0:
         return 0.0, risk_usd
-    return min(round(risk_usd / per_lot_loss, 2), MAX_LOTS), risk_usd
+    lots = math.floor(risk_usd / per_lot_loss * 100 + 1e-9) / 100   # always round DOWN
+    return min(lots, MAX_LOTS), risk_usd
 
 
+def min_lot_risk(symbol, sl_distance, price):
+    """Dollars lost at the stop if the smallest lot (0.01) is used."""
+    loss = 0.01 * sl_distance * CONTRACT.get(symbol, 100000.0)
+    if symbol in JPY_QUOTED:
+        rate = price if symbol == "USD/JPY" else USDJPY_RATE
+        loss = loss / rate if rate else 0.0
+    return loss
+
+
+# ---------------------------------------------------------------- logic
 def sma(candles, period):
     closes = [c["c"] for c in candles]
     if len(closes) < period:
@@ -286,7 +343,7 @@ def daily_bias(candles, pivot=None):
     n = min(len(highs), len(lows))
     for k in range(1, n):
         hp, hc = highs[-k - 1][1], highs[-k][1]
-        lp, lc = lows[-k - 1][1],  lows[-k][1]
+        lp, lc = lows[-k - 1][1], lows[-k][1]
         if hc > hp and lc > lp:
             established, inval_level, inval_i = "bullish", lows[-k][1], lows[-k][0]
             break
@@ -426,6 +483,7 @@ def one_hour_trigger(symbol, candles, zone, bias):
     return None, None
 
 
+# ------------------------------------------------------------- messages
 def entry_message(symbol, bias, zone, trigger, quality, price, bias_q, h4_q):
     side, emoji = ("BUY", "🟢") if bias == "bullish" else ("SELL", "🔴")
     sl, tp1, tp2 = zone["sl"], zone["tp1"], zone["tp2"]
@@ -445,10 +503,13 @@ def entry_message(symbol, bias, zone, trigger, quality, price, bias_q, h4_q):
         f"4H trend: {h4_q} ✅" if h4_q in ("strong", "valid") else f"4H trend: {h4_q} ⚠️",
     ]
 
-    lot_line = (f"📐 *Lot size: {lots:.2f}*  (risking {RISK_PERCENT}% = ${risk_usd:,.0f})\n"
-                if lots > 0 else
-                f"📐 *Lot size: size manually* (risk ${risk_usd:,.0f} over "
-                f"{dist_label(symbol, risk)})\n")
+    if lots >= 0.01:
+        lot_line = f"📐 *Lot size: {lots:.2f}*  (risking {RISK_PERCENT}% = ${risk_usd:,.0f})\n"
+    else:
+        smallest = min_lot_risk(symbol, risk, price)
+        lot_line = (f"📐 *Lot size: SKIP* — stop too wide for a ${ACCOUNT_SIZE:,.0f} account. "
+                    f"Even 0.01 lots would risk ${smallest:,.0f} "
+                    f"(limit ${risk_usd:,.0f}).\n")
 
     return (
         f"{emoji} *{side} — {symbol}*\n"
@@ -494,11 +555,11 @@ def closed_message(tr):
     )
 
 
+# ------------------------------------------------------------- per symbol
 def analyze(symbol, state):
     global USDJPY_RATE
 
     d = get_candles(symbol, TF_BIAS, N_BIAS)
-    time.sleep(8)
     if not d or len(d) < 30:
         return f"{symbol}: daily data unavailable", None
 
@@ -510,7 +571,6 @@ def analyze(symbol, state):
         return f"{symbol}: daily {bias_q} — standing aside", None
 
     h4 = get_candles(symbol, TF_ZONE, N_ZONE)
-    time.sleep(8)
     if not h4 or len(h4) < 40:
         return f"{symbol}: 4H data unavailable", None
 
@@ -527,10 +587,21 @@ def analyze(symbol, state):
         return f"{symbol}: daily {bias} ({bias_q}), no significant 4H leg yet", None
 
     h1 = get_candles(symbol, TF_ENTRY, N_ENTRY)
-    time.sleep(8)
     if not h1 or len(h1) < 40:
         return f"{symbol}: 1H data unavailable", None
 
+    # weekend / quiet market: the newest candle has already closed and no new
+    # one has started, so there is no live candle to read
+    if h1[-1].get("complete"):
+        return f"{symbol}: market quiet or closed — no live 1H candle", None
+
+    if REPORT_ONLY:
+        price = h1[-1]["c"]
+        where = ("IN ZONE" if zone["z_bot"] <= price <= zone["z_top"] else "awaiting retrace")
+        return (f"{symbol}: daily {bias} ({bias_q}) | zone "
+                f"{fmt(symbol, zone['z_bot'])}-{fmt(symbol, zone['z_top'])}, {where}"), None
+
+    # report any trades that hit TP or SL since the last run
     for done in track_update(state, symbol, h1):
         send_telegram(closed_message(done))
         print(f"  closed {done['sym']} {done['result']} {done['R']:+.2f}R")
@@ -578,6 +649,7 @@ def analyze(symbol, state):
             f"{fmt(symbol, zone['z_bot'])}-{fmt(symbol, zone['z_top'])}, awaiting retrace"), None
 
 
+# ------------------------------------------------------------------ main
 def main():
     state = load_state()
     statuses, fired = [], {}
@@ -615,24 +687,34 @@ def main():
             "Take one, or halve the lot size on each."
         )
 
-    save_state(state)
     now = datetime.now(timezone.utc)
     open_n = len(state.get("open_trades", []))
 
-    if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
-        send_telegram(
-            "🔎 *Manual check — current read*\n\n" + "\n".join(statuses) +
-            f"\n\nTracking {open_n} open trade(s)"
-            f"\n_{now.strftime('%a %d %b %H:%M')} UTC · Daily→4H BOS→1H_"
-        )
+    hint = ""
+    if all("data unavailable" in s for s in statuses):
+        hint = ("\n\n⚠️ No price data at all — check the `OANDA_API_KEY` "
+                "(practice token) and that `OANDA_ENV` is practice.")
 
-    if now.hour == HEARTBEAT_UTC_HOUR and now.minute < HEARTBEAT_WINDOW_MIN:
+    if REPORT_ONLY:
+        # status read only: nothing was sent or recorded, state left untouched
+        send_telegram(
+            "🔎 *Manual check — current read*\n\n" + "\n".join(statuses) + hint +
+            f"\n\nTracking {open_n} open trade(s)"
+            f"\n_{now.strftime('%a %d %b %H:%M')} UTC · Daily→4H BOS→1H · OANDA data_"
+        )
+        return
+
+    today = now.strftime("%Y-%m-%d")
+    if now.hour >= HEARTBEAT_UTC_HOUR and state.get("heartbeat_day") != today:
+        state["heartbeat_day"] = today
         send_telegram(
             "✅ *Daily heartbeat — bot alive*\n\n" + "\n".join(statuses) +
             f"\n\nTracking {open_n} open trade(s)"
             f"\n_{now.strftime('%a %d %b %H:%M')} UTC · risk {RISK_PERCENT}%/trade "
-            f"on ${ACCOUNT_SIZE:,.0f}_"
+            f"on ${ACCOUNT_SIZE:,.0f} · OANDA data_"
         )
+
+    save_state(state)
 
 
 if __name__ == "__main__":
