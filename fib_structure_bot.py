@@ -284,12 +284,25 @@ def send_telegram(msg):
     if os.environ.get("DRY_RUN"):
         print("---- telegram (dry run) ----\n" + msg + "\n----------------------------")
         return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}
     try:
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                      json={"chat_id": TELEGRAM_CHAT_ID, "text": msg,
-                            "parse_mode": "Markdown"}, timeout=20)
+        r = requests.post(url, json=payload, timeout=20)
+        body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        if r.status_code == 400 and "parse" in str(body.get("description", "")).lower():
+            payload.pop("parse_mode")                     # formatting glitch: send as plain text
+            r = requests.post(url, json=payload, timeout=20)
+            body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        if r.status_code != 200:
+            hint = {401: "bot token is wrong", 404: "bot token is wrong",
+                    400: "chat ID is wrong, or press Start in your bot's chat",
+                    403: "you blocked the bot, or never pressed Start"}.get(r.status_code, "")
+            print(f"[warn] telegram refused the message: HTTP {r.status_code} "
+                  f"{body.get('description', '')} -> {hint}")
     except Exception as e:
-        print(f"[warn] telegram send failed: {e}")
+        # never write the token into the log
+        print("[warn] telegram send failed: "
+              + str(e).replace(TELEGRAM_BOT_TOKEN, "<token>"))
 
 
 def lot_size(symbol, sl_distance, price):
