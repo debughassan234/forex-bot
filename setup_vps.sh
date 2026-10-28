@@ -55,8 +55,15 @@ chmod +x run_bot.sh
 
 echo "== 5/5  Scheduling: every minute, every day =="
 CRON_LINE="* * * * * $BOT_DIR/run_bot.sh"
-( crontab -l 2>/dev/null | grep -v "run_bot.sh" ; echo "$CRON_LINE" ) | crontab -
+# (the "|| true" matters: on a new server the list is empty, grep finds
+#  nothing, and without it set -e silently saved an EMPTY schedule)
+{ crontab -l 2>/dev/null | grep -v "run_bot.sh" || true; echo "$CRON_LINE"; } | crontab -
 systemctl enable --now cron >/dev/null 2>&1 || true
+if ! crontab -l 2>/dev/null | grep -q "run_bot.sh"; then
+  echo "  !! The schedule did not save. Send Claude a screenshot of this."
+  exit 1
+fi
+echo "  ✓ schedule saved: $CRON_LINE"
 
 echo
 echo "Sending a test status message to your Telegram..."
