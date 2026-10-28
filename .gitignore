@@ -1,0 +1,7 @@
+# server-only files — never upload these to GitHub
+.env
+.env.new
+venv/
+logs/
+bot_state.json
+__pycache__/

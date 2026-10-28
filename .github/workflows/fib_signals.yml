@@ -1,5 +1,9 @@
 name: Fib Structure Signals
 
+# Interim: GitHub keeps running the bot (OANDA data) until the VPS is live.
+# Once the VPS sends its first status message, this schedule gets switched
+# off so signals are not sent twice. "Run workflow" = status check only.
+
 on:
   schedule:
     - cron: '5,25,45 * * * 1-5'
@@ -14,6 +18,7 @@ jobs:
         with:
           python-version: '3.12'
 
+      # remembers which signals were already sent, so nothing repeats
       - name: Restore bot memory
         uses: actions/cache/restore@v4
         with:
@@ -24,7 +29,7 @@ jobs:
       - run: pip install requests
       - run: python fib_structure_bot.py
         env:
-          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
