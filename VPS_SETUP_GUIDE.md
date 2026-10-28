@@ -65,6 +65,7 @@ market is closed — that's normal).
 
 | Want to | Do this |
 |---|---|
+| **Daily health check** | Termius: `bash forex-bot/check.sh` (add `--send` to also test Telegram) |
 | Status check now | GitHub → Actions → **Run workflow**, or in Termius: `bash forex-bot/run_bot.sh --report` |
 | See what the bot did | Termius: `tail -n 40 forex-bot/logs/bot.log` |
 | Install a bot update | Upload the new file to GitHub, then Termius: `cd forex-bot && git pull` |
