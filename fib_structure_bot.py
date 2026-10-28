@@ -16,7 +16,7 @@ zone 0.382-0.618, SL beyond 1.0 + buffer, TP1 -0.382, TP2 -0.618.
 v11 (VPS edition):
   - price data from OANDA (free practice API, no daily call limit) instead
     of Twelve Data. Same candle source as the 11-year backtest.
-  - ACCOUNT_SIZE 5000 (FundedNext 5K).
+  - ACCOUNT_SIZE 6000 (FundedNext Stellar 2-Step 6K).
   - built to run every minute on a VPS: one heartbeat per day,
     TP/SL tracking no longer expires trades early on frequent runs.
   - `python3 fib_structure_bot.py --report` sends a status read
@@ -73,7 +73,7 @@ TRACK_TRADES   = True
 TRACK_MAX_HOURS = 240    # ~10 days before an untouched trade is abandoned
 
 # ------- risk / position sizing (edit these to match your account) -------
-ACCOUNT_SIZE   = 5000.0   # FundedNext Stellar 5K
+ACCOUNT_SIZE   = 6000.0   # FundedNext Stellar 2-Step 6K
 RISK_PERCENT   = 0.5
 DAILY_LOSS_CAP = 5.0
 MAX_LOTS       = 5.0
