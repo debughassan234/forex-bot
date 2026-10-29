@@ -721,7 +721,12 @@ def main():
         return
 
     today = now.strftime("%Y-%m-%d")
-    if now.hour >= HEARTBEAT_UTC_HOUR and state.get("heartbeat_day") != today:
+    # wait (up to 30 min) for a minute where every pair read cleanly, so a
+    # brief OANDA hiccup does not spoil the morning summary
+    clean = not any("data unavailable" in s for s in statuses)
+    waited = (now.hour - HEARTBEAT_UTC_HOUR) * 60 + now.minute >= 30
+    if (now.hour >= HEARTBEAT_UTC_HOUR and state.get("heartbeat_day") != today
+            and (clean or waited)):
         state["heartbeat_day"] = today
         send_telegram(
             "✅ *Daily heartbeat — bot alive*\n\n" + "\n".join(statuses) +
