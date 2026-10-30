@@ -543,8 +543,21 @@ def entry_message(symbol, bias, zone, trigger, quality, price, bias_q, h4_q):
     )
 
 
+def min_entry(zone):
+    """Worst entry price that still gives reward:risk >= MIN_RR to TP1.
+    Sells must be at or ABOVE it, buys at or BELOW it."""
+    return (zone["tp1"] + MIN_RR * zone["sl"]) / (1.0 + MIN_RR)
+
+
 def armed_message(symbol, bias, zone, price, bias_q):
     side = "LONG" if bias == "bullish" else "SHORT"
+    need = min_entry(zone)
+    if bias == "bearish":
+        need_line = (f"📍 A SELL signal needs price at `{fmt(symbol, need)}` *or higher* "
+                     f"(reward:risk {MIN_RR}+). Below that the bot will skip it.\n")
+    else:
+        need_line = (f"📍 A BUY signal needs price at `{fmt(symbol, need)}` *or lower* "
+                     f"(reward:risk {MIN_RR}+). Above that the bot will skip it.\n")
     return (
         f"⚡ *ZONE ARMED — {symbol}* ({side} setup building)\n\n"
         f"Daily bias: *{bias}* ({bias_q}) · 4H BOS confirmed · impulse leg "
@@ -554,7 +567,9 @@ def armed_message(symbol, bias, zone, price, bias_q):
         f"Confluence: {'prior 4H level in zone ✅' if zone['confluence'] else 'none ⚠️'}\n\n"
         f"Planned SL `{fmt(symbol, zone['sl'])}` | TP1 `{fmt(symbol, zone['tp1'])}` | "
         f"TP2 `{fmt(symbol, zone['tp2'])}`\n\n"
-        f"_Now waiting for 1H evidence (swing break or confirmation candle)._"
+        + need_line +
+        f"_Then it needs 1H evidence: a 1H close through the last swing, "
+        f"or an engulfing / pin bar closing in the zone._"
     )
 
 
