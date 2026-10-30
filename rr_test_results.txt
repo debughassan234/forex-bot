@@ -1,0 +1,11 @@
+MIN REWARD:RISK TEST · run 2026-10-30 20:31 UTC
+
+  min RR trades  /mo  IS avg  OOS avg   OOS R  win%    PF  pass@1%  pass@2%  fail@2%
+  ----------------------------------------------------------------------------------------
+     1.0    689  4.8  -0.093   -0.010    -2.7  38.8  0.98    19.7%    23.9%    76.1%
+     1.2    555  3.9  -0.126   +0.071   +15.7  39.2  1.13    19.7%    22.2%    77.8%
+     1.5    399  2.8  -0.146   +0.029    +4.7  35.0  1.05     0.0%    12.0%    87.2%  <- current
+     2.0    117  0.8  +0.059   +0.175    +8.2  36.2  1.28    13.9%    31.3%    28.7%
+
+  IS/OOS avg = average R per trade in the first 60% / last 40% of trades.
+  pass@ = share of monthly challenge starts that passed both phases within 24 months.
