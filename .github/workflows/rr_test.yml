@@ -1,0 +1,36 @@
+name: Backtest - minimum reward:risk
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python rr_test.py
+        env:
+          OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - name: Save results
+        if: always()
+        run: |
+          [ -f rr_test_results.txt ] || exit 0
+          cp rr_test_results.txt /tmp/results.txt
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git checkout --orphan rr-test-results
+          git rm -rq --cached . >/dev/null 2>&1 || true
+          cp /tmp/results.txt rr_test_results.txt
+          git add rr_test_results.txt
+          git commit -qm "Min RR test results"
+          git push -f origin rr-test-results
