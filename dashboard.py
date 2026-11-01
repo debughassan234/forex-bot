@@ -243,37 +243,77 @@ def events(n=25):
 
 # ------------------------------------------------------------------ render
 CSS = """
-:root{--bg:#f6f7f9;--card:#fff;--ink:#14171c;--mute:#646b76;--line:#e3e6eb;--good:#0f8a4f;--bad:#c4332b;
---warn:#b26b00;--acc:#3b5bdb;--chip:#eef1f6;--bar:#e8ebf0}
-@media (prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--ink:#e8ebef;--mute:#9aa3ae;--line:#272d36;
---good:#3ccf8e;--bad:#ff6b61;--warn:#f0b44c;--acc:#7c95ff;--chip:#222833;--bar:#262c36}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
-font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-main{max-width:860px;margin:0 auto;padding:16px 16px 48px}
-h1{font-size:20px;margin:4px 0 2px}h2{font-size:15px;margin:0 0 10px;color:var(--mute);font-weight:600;
-text-transform:uppercase;letter-spacing:.04em}
-.sub{color:var(--mute);font-size:13px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;
-padding:14px 16px;margin:12px 0}
+:root{
+  --ink:#0d0e10; --ink2:rgba(13,14,16,.62); --ink3:rgba(13,14,16,.38);
+  --bg1:#eceef1; --bg2:#d9dce1;
+  --glass:rgba(255,255,255,.42); --glass2:rgba(255,255,255,.34);
+  --edge:rgba(255,255,255,.75); --edge2:rgba(13,14,16,.07);
+  --hi:inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(13,14,16,.04);
+  --shadow:0 10px 40px rgba(13,14,16,.10), 0 1px 3px rgba(13,14,16,.06);
+  --track:rgba(13,14,16,.08); --fill:rgba(13,14,16,.78);
+  --btn:#0d0e10; --btnink:#fff; --blob1:rgba(255,255,255,.95); --blob2:rgba(150,155,165,.45);
+}
+@media (prefers-color-scheme:dark){:root{
+  --ink:#f4f5f7; --ink2:rgba(244,245,247,.64); --ink3:rgba(244,245,247,.38);
+  --bg1:#0b0c0e; --bg2:#16181b;
+  --glass:rgba(255,255,255,.065); --glass2:rgba(255,255,255,.05);
+  --edge:rgba(255,255,255,.16); --edge2:rgba(255,255,255,.04);
+  --hi:inset 0 1px 0 rgba(255,255,255,.14), inset 0 -1px 0 rgba(0,0,0,.25);
+  --shadow:0 12px 44px rgba(0,0,0,.45), 0 1px 2px rgba(0,0,0,.4);
+  --track:rgba(255,255,255,.10); --fill:rgba(255,255,255,.86);
+  --btn:#f4f5f7; --btnink:#0b0c0e; --blob1:rgba(255,255,255,.10); --blob2:rgba(255,255,255,.05);
+}}
+*{box-sizing:border-box}
+html{background:var(--bg1)}
+body{margin:0;color:var(--ink);min-height:100vh;
+  font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  background:radial-gradient(900px 600px at 12% -5%,var(--blob1),transparent 60%),
+             radial-gradient(700px 520px at 105% 18%,var(--blob2),transparent 62%),
+             radial-gradient(800px 700px at 30% 110%,var(--blob2),transparent 60%),
+             linear-gradient(160deg,var(--bg1),var(--bg2));
+  background-attachment:fixed}
+main{max-width:860px;margin:0 auto;padding:18px 16px 56px}
+h1{font-size:26px;letter-spacing:-.02em;margin:6px 0 4px;font-weight:700;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+h2{font-size:12px;margin:0 0 12px;color:var(--ink2);font-weight:600;text-transform:uppercase;letter-spacing:.09em}
+.sub{color:var(--ink2);font-size:13px}
+.card,.stat,input,select,button.ghost,.pill{
+  -webkit-backdrop-filter:blur(26px) saturate(160%);backdrop-filter:blur(26px) saturate(160%)}
+.card{background:var(--glass);border:1px solid var(--edge);border-radius:24px;padding:16px 18px;margin:14px 0;
+  box-shadow:var(--hi),var(--shadow)}
 .row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1 1 150px}
-.stat{background:var(--chip);border-radius:10px;padding:10px 12px}.stat b{display:block;font-size:19px}
-.stat span{font-size:12px;color:var(--mute)}
-.pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:600;background:var(--chip)}
-.good{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}.mute{color:var(--mute)}
-.bar{height:8px;background:var(--bar);border-radius:99px;overflow:hidden;margin:6px 0 2px}
-.bar i{display:block;height:100%;background:var(--acc)}.bar i.red{background:var(--bad)}.bar i.grn{background:var(--good)}
-.pair{border-top:1px solid var(--line);padding:10px 0}.pair:first-of-type{border-top:0;padding-top:0}
-.pair h3{margin:0;font-size:16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:14px;margin-top:6px}
-.kv dt{color:var(--mute)}.kv dd{margin:0;font-variant-numeric:tabular-nums}
-table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:7px 4px;border-top:1px solid var(--line)}
-th{color:var(--mute);font-weight:500;font-size:12px;border-top:0}td.num{text-align:right;font-variant-numeric:tabular-nums}
+.stat{background:var(--glass2);border:1px solid var(--edge);border-radius:16px;padding:11px 13px;box-shadow:var(--hi)}
+.stat b{display:block;font-size:20px;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.stat span{font-size:12px;color:var(--ink2)}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;
+  background:var(--glass2);border:1px solid var(--edge);box-shadow:var(--hi);color:var(--ink)}
+.good{font-weight:700}.mute{color:var(--ink2)}
+.bad{font-weight:700;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
+.warn{font-weight:700;text-decoration:underline dotted;text-underline-offset:3px}
+.pill.bad,.pill.warn{text-decoration:none;background:var(--btn);color:var(--btnink);border-color:transparent}
+.bar{height:8px;background:var(--track);border-radius:99px;overflow:hidden;margin:7px 0 3px}
+.bar i{display:block;height:100%;background:var(--fill);border-radius:99px}
+.pair{border-top:1px solid var(--edge2);padding:12px 0}.pair:first-of-type{border-top:0;padding-top:0}
+.pair h3{margin:0;font-size:17px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;letter-spacing:-.01em}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:14px;margin-top:8px}
+.kv dt{color:var(--ink2)}.kv dd{margin:0;font-variant-numeric:tabular-nums}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{text-align:left;padding:8px 4px;border-top:1px solid var(--edge2)}
+th{color:var(--ink2);font-weight:500;font-size:12px;border-top:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
 form{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:10px}
-input,select,button{font:inherit;padding:9px 10px;border-radius:9px;border:1px solid var(--line);
-background:var(--bg);color:var(--ink);min-width:0;width:100%}
-button{background:var(--acc);color:#fff;border:0;font-weight:600;cursor:pointer}
-button.ghost{background:transparent;color:var(--mute);border:1px solid var(--line);padding:4px 8px;width:auto;font-size:12px}
-.msg{font-size:13px;margin-top:6px}.ev{font-size:14px;padding:6px 0;border-top:1px solid var(--line)}
-.ev:first-child{border-top:0}details summary{cursor:pointer;color:var(--mute);font-size:13px}
+input,select,button{font:inherit;padding:10px 12px;border-radius:12px;min-width:0;width:100%;color:var(--ink);
+  background:var(--glass2);border:1px solid var(--edge);box-shadow:var(--hi);outline:none}
+input:focus,select:focus{border-color:var(--ink3)}
+input::placeholder{color:var(--ink3)}
+button{background:var(--btn);color:var(--btnink);border:0;font-weight:600;cursor:pointer;box-shadow:var(--shadow)}
+button.ghost{background:var(--glass2);color:var(--ink);border:1px solid var(--edge);padding:5px 10px;width:auto;
+  font-size:12px;box-shadow:var(--hi)}
+.msg{font-size:13px;margin-top:6px}
+.ev{font-size:14px;padding:8px 0;border-top:1px solid var(--edge2)}.ev:first-child{border-top:0}
+.tag{display:inline-block;min-width:58px;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--ink2)}
+details summary{cursor:pointer;color:var(--ink2);font-size:13px}
+td.good,td.bad{text-decoration:none;font-weight:600}td.bad{color:var(--ink2)}
 """
 
 
@@ -286,8 +326,8 @@ def render(now=None):
     acc = CHALLENGE["account"]
 
     # header
-    state = ("<span class='pill good'>● Running</span>" if h["ok"] else
-             "<span class='pill bad'>● Check the bot</span>")
+    state = ("<span class='pill'>● Running</span>" if h["ok"] else
+             "<span class='pill bad'>⚠︎ Check the bot</span>")
     parts = [f"<h1>Fib Bot {state}</h1>",
              f"<div class='sub'>Updated {esc(lagos(now, '%H:%M:%S'))} Lagos · last check "
              f"{esc(ago(h['last'], now))} · refreshes every minute</div>"]
@@ -301,7 +341,7 @@ def render(now=None):
         left = ch["target"] - ch["profit"]
         prog = (f"<div class='sub'>Profit target {money(ch['target'])} · "
                 f"{'<b class=good>reached</b>' if left <= 0 else money(left) + ' to go'}</div>"
-                f"<div class='bar'><i class='grn' style='width:{pct:.0f}%'></i></div>")
+                f"<div class='bar'><i style='width:{pct:.0f}%'></i></div>")
         title = f"FundedNext 2-Step · Phase {ch['phase']}"
     used_pct = min(100, 100 * ch["used"] / ch["daily_limit"])
     own = CHALLENGE["own_daily_stop"]
@@ -312,13 +352,13 @@ def render(now=None):
                  f"<div class='stat'><b>{money(ch['balance'])}</b><span>balance ({money(ch['profit'], True)})</span></div>"
                  f"<div class='stat'><b class='{dclass}'>{money(ch['used'])} / {money(ch['daily_limit'])}</b>"
                  f"<span>lost today · your stop {money(own)}</span>"
-                 f"<div class='bar'><i class='red' style='width:{used_pct:.0f}%'></i></div></div>"
+                 f"<div class='bar'><i style='width:{used_pct:.0f}%'></i></div></div>"
                  f"<div class='stat'><b>{money(ch['room'])}</b><span>room above the {money(ch['floor'])} floor</span></div>"
                  f"<div class='stat'><b class='{'good' if days_ok else ''}'>{ch['days']} / {CHALLENGE['min_days']}</b>"
                  f"<span>trading days</span></div></div>"
                  f"<div class='sub' style='margin-top:8px'>Daily limit resets {esc(lagos(ch['reset'], '%a %H:%M'))} Lagos · "
                  f"{ch['wins']} win{'' if ch['wins'] == 1 else 's'}, {ch['losses']} loss{'' if ch['losses'] == 1 else 'es'}</div>"
-                 + ("<p class='good'><b>🎉 Phase target and trading days met — check your FundedNext dashboard.</b></p>" if done else "")
+                 + ("<p><b>✓ Phase target and trading days met — check your FundedNext dashboard.</b></p>" if done else "")
                  + _trade_form(ch) + "</section>")
 
     # pairs
@@ -367,14 +407,14 @@ def render(now=None):
         t = parse_t(e.get("t", ""))
         sym = e.get("sym", "")
         if e["kind"] == "armed":
-            txt = (f"⚡ <b>{esc(sym)}</b> zone armed ({'sell' if e.get('dir') == 'bearish' else 'buy'} side) · "
+            txt = (f"<span class='tag'>ZONE</span><b>{esc(sym)}</b> zone armed ({'sell' if e.get('dir') == 'bearish' else 'buy'} side) · "
                    f"signal needs {fmt(sym, e.get('need'))}")
         elif e["kind"] == "entry":
-            txt = (f"{'🔴 SELL' if e.get('dir') == 'bearish' else '🟢 BUY'} <b>{esc(sym)}</b> at {fmt(sym, e.get('price'))} · "
+            txt = (f"<span class='tag'>{'▼ SELL' if e.get('dir') == 'bearish' else '▲ BUY'}</span><b>{esc(sym)}</b> at {fmt(sym, e.get('price'))} · "
                    f"SL {fmt(sym, e.get('sl'))} · TP1 {fmt(sym, e.get('tp1'))} · {esc(e.get('lots'))} lots · RR {esc(e.get('rr'))}")
         elif e["kind"] == "closed":
             r = e.get("R") or 0
-            txt = (f"{'🎯' if r > 0 else '🛑'} <b>{esc(sym)}</b> closed: {esc(e.get('result'))} "
+            txt = (f"<span class='tag'>{'✓ WIN' if r > 0 else '✕ LOSS'}</span><b>{esc(sym)}</b> closed: {esc(e.get('result'))} "
                    f"<span class='{'good' if r > 0 else 'bad'}'>{r:+.2f}R</span>")
         else:
             continue
