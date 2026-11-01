@@ -5,3 +5,8 @@ venv/
 logs/
 bot_state.json
 __pycache__/
+.dashboard_token
+status.json
+status.json.tmp
+challenge.json
+challenge.json.tmp
