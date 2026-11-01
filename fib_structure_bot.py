@@ -89,6 +89,26 @@ USDJPY_RATE = None
 
 HEARTBEAT_UTC_HOUR   = 7     # 8am Lagos time; sent once per day
 
+# ---- dashboard feed (read by dashboard.py) ----
+BOT_DIR     = os.path.dirname(os.path.abspath(__file__))
+STATUS_FILE = os.path.join(BOT_DIR, "status.json")
+EVENTS_FILE = os.path.join(BOT_DIR, "logs", "events.jsonl")
+LIVE        = {}     # per-symbol details from this run
+
+
+def log_event(kind, **data):
+    """Append one alert / entry / closed-trade record for the dashboard."""
+    if REPORT_ONLY:
+        return
+    try:
+        os.makedirs(os.path.dirname(EVENTS_FILE), exist_ok=True)
+        rec = {"t": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+               "kind": kind, **data}
+        with open(EVENTS_FILE, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+    except Exception as e:
+        print(f"[warn] could not write event: {e}")
+
 
 # ---------------------------------------------------------------- state
 def load_state():
@@ -598,6 +618,7 @@ def analyze(symbol, state):
         USDJPY_RATE = d[-1]["c"]
 
     bias, bias_q = daily_bias(d)
+    LIVE[symbol] = {"bias": bias, "q": bias_q, "price": d[-1]["c"]}
     if bias is None:
         return f"{symbol}: daily {bias_q} — standing aside", None
 
@@ -616,6 +637,9 @@ def analyze(symbol, state):
     zone = four_hour_zone(h4, bias)
     if zone is None:
         return f"{symbol}: daily {bias} ({bias_q}), no significant 4H leg yet", None
+    LIVE[symbol].update({"zone": {k: zone[k] for k in
+                                  ("z_bot", "z_top", "sl", "tp1", "tp2", "leg_lo", "leg_hi")},
+                         "need": min_entry(zone), "price": h4[-1]["c"]})
 
     h1 = get_candles(symbol, TF_ENTRY, N_ENTRY)
     if not h1 or len(h1) < 40:
@@ -635,10 +659,13 @@ def analyze(symbol, state):
     # report any trades that hit TP or SL since the last run
     for done in track_update(state, symbol, h1):
         send_telegram(closed_message(done))
+        log_event("closed", sym=done["sym"], dir=done["dir"], entry=done["entry"],
+                  result=done["result"], R=done["R"])
         print(f"  closed {done['sym']} {done['result']} {done['R']:+.2f}R")
 
     price = h1[-1]["c"]
     in_zone_now = zone["z_bot"] <= price <= zone["z_top"]
+    LIVE[symbol].update({"price": price, "in_zone": in_zone_now})
     prev_in_zone = zone["z_bot"] <= h1[-2]["c"] <= zone["z_top"]
     fresh = candle_age_minutes(h1) <= ENTRY_MAX_AGE
 
@@ -665,12 +692,18 @@ def analyze(symbol, state):
                                     bias_q, h4_q))
         mark_sent(state, symbol, bias, zone)
         track_add(state, symbol, bias, price, zone)
+        lots, _ = lot_size(symbol, risk, price)
+        log_event("entry", sym=symbol, dir=bias, price=price, sl=zone["sl"],
+                  tp1=zone["tp1"], tp2=zone["tp2"], rr=round(rr1, 2), lots=lots,
+                  trigger=trigger)
         return (f"{symbol}: daily {bias} ({bias_q}) | ENTRY SENT ({quality}, RR {rr1:.2f})",
                 "long" if bias == "bullish" else "short")
 
     if in_zone_now and not prev_in_zone and not already_sent(state, symbol, "armed", zone):
         send_telegram(armed_message(symbol, bias, zone, price, bias_q))
         mark_sent(state, symbol, "armed", zone)
+        log_event("armed", sym=symbol, dir=bias, price=price, z_bot=zone["z_bot"],
+                  z_top=zone["z_top"], need=min_entry(zone))
         return f"{symbol}: daily {bias} ({bias_q}) | entered zone — awaiting 1H evidence", None
 
     if in_zone_now:
@@ -720,6 +753,19 @@ def main():
 
     now = datetime.now(timezone.utc)
     open_n = len(state.get("open_trades", []))
+
+    if not REPORT_ONLY:
+        try:
+            pairs = []
+            for sym, line in zip(SYMBOLS, statuses):
+                pairs.append({"sym": sym, "line": line, **LIVE.get(sym, {})})
+            with open(STATUS_FILE + ".tmp", "w") as f:
+                json.dump({"t": now.isoformat(timespec="seconds"), "pairs": pairs,
+                           "account": ACCOUNT_SIZE, "risk": RISK_PERCENT,
+                           "min_rr": MIN_RR}, f)
+            os.replace(STATUS_FILE + ".tmp", STATUS_FILE)
+        except Exception as e:
+            print(f"[warn] could not write status: {e}")
 
     hint = ""
     if all("data unavailable" in s for s in statuses):
