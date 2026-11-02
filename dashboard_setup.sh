@@ -39,13 +39,19 @@ echo "== 3/4  Firewall: allow the dashboard port =="
 ufw allow $PORT/tcp >/dev/null
 
 echo "== 4/4  Checking it works =="
-sleep 2
 IP=$(curl -s --max-time 5 -4 https://ifconfig.me || hostname -I | awk '{print $1}')
 URL="http://$IP:$PORT/$(cat .dashboard_token)/"
-if curl -s --max-time 5 -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/$(cat .dashboard_token)/" | grep -q 200; then
+code=000
+for i in $(seq 1 15); do            # give it up to 15 seconds to start
+  code=$(curl -s --max-time 3 -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/$(cat .dashboard_token)/" || true)
+  [ "$code" = "200" ] && break
+  sleep 1
+done
+if [ "$code" = "200" ]; then
   echo "  ✅ dashboard is running"
 else
-  echo "  ❌ dashboard did not start — send Claude the output of: journalctl -u fibdash -n 20 --no-pager"
+  echo "  ❌ dashboard did not start (answer: $code). Last messages from it:"
+  journalctl -u fibdash -n 15 --no-pager | sed 's/^/     /'
   exit 1
 fi
 
