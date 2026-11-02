@@ -304,22 +304,20 @@ def ring_svg(frac, big, small):
 
 
 CSS = """
-:root{--ink:#0c0d0f;--ink2:rgba(12,13,15,.62);--ink3:rgba(12,13,15,.38);
-  --glass:rgba(255,255,255,.30);--glass2:rgba(255,255,255,.38);--edge:rgba(255,255,255,.62);
-  --line:rgba(12,13,15,.09);--shadow:0 20px 50px rgba(0,0,0,.18),0 2px 6px rgba(0,0,0,.08);
-  --hi:inset 0 1px 0 rgba(255,255,255,.85);--bgdim:1;--fill:rgba(12,13,15,.85);--track:rgba(12,13,15,.10);
+:root{--ink:#0c0d0f;--ink2:rgba(12,13,15,.62);--ink3:rgba(12,13,15,.38);--page:#ffffff;
+  --glass:rgba(255,255,255,.72);--glass2:rgba(12,13,15,.035);--edge:rgba(12,13,15,.09);
+  --line:rgba(12,13,15,.08);--shadow:0 14px 40px rgba(0,0,0,.08),0 1px 3px rgba(0,0,0,.06);
+  --hi:inset 0 1px 0 rgba(255,255,255,.85);--fill:rgba(12,13,15,.85);--track:rgba(12,13,15,.10);
   --solid:#0c0d0f;--solidink:#fff}
-@media (prefers-color-scheme:dark){:root{--ink:#f4f5f7;--ink2:rgba(244,245,247,.66);--ink3:rgba(244,245,247,.4);
-  --glass:rgba(255,255,255,.08);--glass2:rgba(255,255,255,.11);--edge:rgba(255,255,255,.16);
+@media (prefers-color-scheme:dark){:root{--ink:#f4f5f7;--ink2:rgba(244,245,247,.66);--ink3:rgba(244,245,247,.4);--page:#000000;
+  --glass:rgba(255,255,255,.06);--glass2:rgba(255,255,255,.07);--edge:rgba(255,255,255,.13);
   --line:rgba(255,255,255,.09);--shadow:0 20px 60px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.4);
-  --hi:inset 0 1px 0 rgba(255,255,255,.14);--bgdim:.32;--fill:rgba(255,255,255,.92);--track:rgba(255,255,255,.12);
+  --hi:inset 0 1px 0 rgba(255,255,255,.14);--fill:rgba(255,255,255,.92);--track:rgba(255,255,255,.12);
   --solid:#f4f5f7;--solidink:#0c0d0f}}
 *{box-sizing:border-box}
-html{background:#8d8f92}
+html,body{background:var(--page)}
 body{margin:0;color:var(--ink);min-height:100vh;overflow-x:hidden;
   font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
-.bg{position:fixed;inset:-40px;z-index:-1;background:url('bg.jpg') center/cover no-repeat;
-  filter:brightness(var(--bgdim)) contrast(1.05)}
 main{max-width:1180px;margin:0 auto;padding:16px 16px 120px}
 .glass{background:var(--glass);border:1px solid var(--edge);border-radius:24px;box-shadow:var(--hi),var(--shadow);
   -webkit-backdrop-filter:blur(26px) saturate(150%);backdrop-filter:blur(26px) saturate(150%)}
@@ -577,8 +575,8 @@ def _trade_form(ch):
 PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow"><meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><title>Fib Bot</title>
-<style>{{CSS}}</style></head><body><div class="bg"></div><main>{{BODY}}</main>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)"><title>Fib Bot</title>
+<style>{{CSS}}</style></head><body><main>{{BODY}}</main>
 <script>
 async function post(body){
   const r = await fetch('api', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
