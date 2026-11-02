@@ -5,7 +5,6 @@
 set -e
 BOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$BOT_DIR"
-PORT=8080
 
 echo "== 1/4  Secret link =="
 if [ "$1" = "--new-link" ] || [ ! -s .dashboard_token ]; then
@@ -17,12 +16,23 @@ fi
 chmod 600 .dashboard_token
 
 echo "== 2/4  Background service (starts on boot, restarts if it stops) =="
+# pick a free port (8080 is often taken by other software)
+systemctl stop fibdash >/dev/null 2>&1 || true
+sleep 1
+PORT=""
+for p in $(cat .dashboard_port 2>/dev/null) 8080 8787 8888 9090 9443 18080; do
+  if ! ss -ltnH "sport = :$p" | grep -q .; then PORT=$p; break; fi
+done
+[ -z "$PORT" ] && { echo "  ❌ no free port found"; exit 1; }
+echo "$PORT" > .dashboard_port
+echo "  using port $PORT"
 cat > /etc/systemd/system/fibdash.service <<EOF
 [Unit]
 Description=Fib bot dashboard
 After=network-online.target
 
 [Service]
+Environment=DASH_PORT=$PORT
 WorkingDirectory=$BOT_DIR
 ExecStart=$BOT_DIR/venv/bin/python $BOT_DIR/dash_server.py
 Restart=always
