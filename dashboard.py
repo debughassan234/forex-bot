@@ -20,6 +20,7 @@ P = lambda *a: os.path.join(BOT_DIR, *a)
 LAGOS = timezone(timedelta(hours=1))
 PIP = {"EUR/USD": 0.0001, "USD/JPY": 0.01, "EUR/JPY": 0.01, "XAU/USD": 1.0}
 PAIRS = ["XAU/USD", "EUR/USD", "USD/JPY", "EUR/JPY"]
+BG_FILE = P("assets", "user_bg.jpg")   # your own background photo (never uploaded to GitHub)
 
 # FundedNext Stellar 2-Step
 CHALLENGE = {"account": 6000.0, "targets": {1: 8.0, 2: 5.0}, "daily_pct": 5.0,
@@ -173,6 +174,12 @@ def apply_action(a):
         c["phase"], c["trades"] = ph, []
         save_challenge(c)
         return True, f"Now tracking phase {ph}"
+    if act == "bg_remove":
+        try:
+            os.remove(BG_FILE)
+        except OSError:
+            pass
+        return True, "Background removed"
     return False, "Unknown action"
 
 
@@ -316,6 +323,16 @@ CSS = """
   --solid:#f4f5f7;--solidink:#0c0d0f}}
 *{box-sizing:border-box}
 html,body{background:var(--page)}
+.bg{position:fixed;inset:-30px;z-index:-1;background-position:center;background-size:cover;background-repeat:no-repeat}
+body.photo{background:transparent;--glass:rgba(255,255,255,.30);--glass2:rgba(255,255,255,.36);--edge:rgba(255,255,255,.6);
+  --line:rgba(12,13,15,.09);--shadow:0 20px 50px rgba(0,0,0,.2),0 2px 6px rgba(0,0,0,.1)}
+body.photo .head h1,body.photo .head .sub{text-shadow:0 1px 16px rgba(255,255,255,.7)}
+@media (prefers-color-scheme:dark){body.photo{--glass:rgba(20,22,26,.38);--glass2:rgba(255,255,255,.08);
+  --edge:rgba(255,255,255,.18);--line:rgba(255,255,255,.1)}
+  body.photo .bg{filter:brightness(.62)}
+  body.photo .head h1,body.photo .head .sub{text-shadow:0 1px 16px rgba(0,0,0,.7)}}
+.bgctl{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center}
+.bgctl label{cursor:pointer}
 body{margin:0;color:var(--ink);min-height:100vh;overflow-x:hidden;
   font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
 main{max-width:1180px;margin:0 auto;padding:16px 16px 120px}
@@ -540,11 +557,22 @@ def render(now=None):
              f"<div><b class='{'' if h['runs'] >= 50 else 'warnline'}'>{h['runs']} / 60</b><span>checks last hour</span></div>"
              f"<div><b>{h['hiccups']}</b><span>OANDA hiccups (auto-retried)</span></div>"
              f"<div><b class='{'' if h['tg_err'] == 0 else 'warnline'}'>{'OK' if h['tg_err'] == 0 else h['tg_err']}</b>"
-             f"<span>Telegram</span></div></div></section>")
+             f"<span>Telegram</span></div></div>"
+             "<div class='bgctl'><label class='status'>Change background"
+             "<input type='file' accept='image/*' id='bgfile' hidden onchange='setBg(this)'></label>"
+             + ("<button class='ghost' onclick=\"act({action:'bg_remove'},'Remove your background photo?')\">"
+                "Remove background</button>" if os.path.exists(BG_FILE) else "")
+             + "<span id='bgmsg' class='sub'></span></div></section>")
 
     o.append("<nav class='nav glass'><a href='#overview' class='on'>Overview</a><a href='#pairs'>Pairs</a>"
              "<a href='#alerts'>Alerts</a><a href='#trades'>Trades</a><a href='#health'>Health</a></nav>")
-    return PAGE.replace("{{CSS}}", CSS).replace("{{BODY}}", "".join(o))
+    if os.path.exists(BG_FILE):
+        v = int(os.path.getmtime(BG_FILE))
+        bodyclass, bgdiv = " class='photo'", f"<div class='bg' style=\"background-image:url('bg?v={v}')\"></div>"
+    else:
+        bodyclass, bgdiv = "", ""
+    return (PAGE.replace("{{CSS}}", CSS).replace("{{BODYCLASS}}", bodyclass)
+            .replace("{{BGDIV}}", bgdiv).replace("{{BODY}}", "".join(o)))
 
 
 def _trade_form(ch):
@@ -576,7 +604,7 @@ PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow"><meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)"><title>Fib Bot</title>
-<style>{{CSS}}</style></head><body><main>{{BODY}}</main>
+<style>{{CSS}}</style></head><body{{BODYCLASS}}>{{BGDIV}}<main>{{BODY}}</main>
 <script>
 async function post(body){
   const r = await fetch('api', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
@@ -594,6 +622,22 @@ async function addTrade(e){
   body.pnl = String(body.pnl).replace(/[$,\\s]/g,'').replace('\\u2212','-');
   const j = await post(body);
   if(j.ok) location.reload(); else document.getElementById('msg').textContent = j.msg;
+}
+async function setBg(input){
+  const f = input.files && input.files[0]; if(!f) return;
+  const m = document.getElementById('bgmsg'); m.textContent = 'Preparing photo…';
+  try{
+    const img = await createImageBitmap(f);
+    const k = Math.min(1, 2560 / Math.max(img.width, img.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.84));
+    m.textContent = 'Uploading…';
+    const r = await fetch('bg', {method:'POST', headers:{'Content-Type':'image/jpeg'}, body: blob});
+    const j = await r.json().catch(()=>({ok:false,msg:'Upload failed'}));
+    if(j.ok) location.reload(); else m.textContent = j.msg || 'Upload failed';
+  }catch(e){ m.textContent = 'Could not read that picture — try a JPG or PNG.'; }
 }
 const links = [...document.querySelectorAll('.nav a')];
 const secs = links.map(a => document.querySelector(a.getAttribute('href')));
