@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Sets up the private dashboard web page on the VPS.  Run once:
 #   bash forex-bot/dashboard_setup.sh
-# Safe to run again (keeps the same link).  New link:  bash forex-bot/dashboard_setup.sh --new-link
+# Safe to run again (keeps the same link and password).
+# New link:      bash forex-bot/dashboard_setup.sh --new-link
+# New password:  bash forex-bot/dashboard_setup.sh --password
 set -e
 BOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$BOT_DIR"
@@ -14,6 +16,28 @@ else
   echo "  keeping your existing link"
 fi
 chmod 600 .dashboard_token
+
+echo "== Password (asked once on each phone / Mac) =="
+if [ "$1" = "--password" ] || [ ! -s .dashboard_pass ]; then
+  while true; do
+    read -r -s -p "  Choose a dashboard password (8+ characters): " P1; echo
+    read -r -s -p "  Type it again: " P2; echo
+    if [ "$P1" != "$P2" ]; then echo "  They don't match — try again."; continue; fi
+    if [ ${#P1} -lt 8 ]; then echo "  Too short — use at least 8 characters."; continue; fi
+    break
+  done
+  printf '%s' "$P1" | ./venv/bin/python -c '
+import sys, os, hashlib
+pw = sys.stdin.read().encode(); salt = os.urandom(16); it = 300000
+print("pbkdf2_sha256$%d$%s$%s" % (it, salt.hex(), hashlib.pbkdf2_hmac("sha256", pw, salt, it).hex()))
+' > .dashboard_pass
+  unset P1 P2
+  chmod 600 .dashboard_pass
+  rm -f .dashboard_sessions.json      # new password logs every device out
+  echo "  ✓ password saved"
+else
+  echo "  keeping your existing password (change it with: --password)"
+fi
 
 echo "== 2/4  Background service (starts on boot, restarts if it stops) =="
 # pick a free port (8080 is often taken by other software)

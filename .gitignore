@@ -13,3 +13,6 @@ challenge.json.tmp
 assets/user_bg.jpg
 assets/user_bg.jpg.tmp
 .dashboard_port
+.dashboard_pass
+.dashboard_sessions.json
+.dashboard_sessions.json.tmp
