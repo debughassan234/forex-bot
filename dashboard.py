@@ -244,76 +244,99 @@ def events(n=25):
 # ------------------------------------------------------------------ render
 CSS = """
 :root{
-  --ink:#0d0e10; --ink2:rgba(13,14,16,.62); --ink3:rgba(13,14,16,.38);
-  --bg1:#eceef1; --bg2:#d9dce1;
-  --glass:rgba(255,255,255,.42); --glass2:rgba(255,255,255,.34);
-  --edge:rgba(255,255,255,.75); --edge2:rgba(13,14,16,.07);
-  --hi:inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(13,14,16,.04);
-  --shadow:0 10px 40px rgba(13,14,16,.10), 0 1px 3px rgba(13,14,16,.06);
-  --track:rgba(13,14,16,.08); --fill:rgba(13,14,16,.78);
-  --btn:#0d0e10; --btnink:#fff; --blob1:rgba(255,255,255,.95); --blob2:rgba(150,155,165,.45);
+  --ink:#0b0c0e; --ink2:rgba(11,12,14,.6); --ink3:rgba(11,12,14,.36);
+  --bg1:#dde0e5; --bg2:#b3b8c1; --orb1:rgba(255,255,255,1); --orb2:rgba(62,68,78,.42); --orb3:rgba(255,255,255,.9);
+  --tint:rgba(255,255,255,.04); --tint2:rgba(255,255,255,.12);
+  --rim1:rgba(255,255,255,1); --rim2:rgba(255,255,255,.15); --rim3:rgba(255,255,255,.65);
+  --sheen:rgba(255,255,255,.42); --inner:rgba(255,255,255,.28);
+  --shadow:0 18px 50px rgba(30,34,40,.16), 0 2px 6px rgba(30,34,40,.08);
+  --line:rgba(11,12,14,.08); --track:rgba(11,12,14,.09); --fill:rgba(11,12,14,.8);
 }
 @media (prefers-color-scheme:dark){:root{
-  --ink:#f4f5f7; --ink2:rgba(244,245,247,.64); --ink3:rgba(244,245,247,.38);
-  --bg1:#0b0c0e; --bg2:#16181b;
-  --glass:rgba(255,255,255,.065); --glass2:rgba(255,255,255,.05);
-  --edge:rgba(255,255,255,.16); --edge2:rgba(255,255,255,.04);
-  --hi:inset 0 1px 0 rgba(255,255,255,.14), inset 0 -1px 0 rgba(0,0,0,.25);
-  --shadow:0 12px 44px rgba(0,0,0,.45), 0 1px 2px rgba(0,0,0,.4);
-  --track:rgba(255,255,255,.10); --fill:rgba(255,255,255,.86);
-  --btn:#f4f5f7; --btnink:#0b0c0e; --blob1:rgba(255,255,255,.10); --blob2:rgba(255,255,255,.05);
+  --ink:#f5f6f8; --ink2:rgba(245,246,248,.62); --ink3:rgba(245,246,248,.36);
+  --bg1:#07080a; --bg2:#121418; --orb1:rgba(255,255,255,.22); --orb2:rgba(255,255,255,.07); --orb3:rgba(255,255,255,.14);
+  --tint:rgba(255,255,255,.035); --tint2:rgba(255,255,255,.05);
+  --rim1:rgba(255,255,255,.55); --rim2:rgba(255,255,255,.05); --rim3:rgba(255,255,255,.28);
+  --sheen:rgba(255,255,255,.12); --inner:rgba(255,255,255,.06);
+  --shadow:0 20px 60px rgba(0,0,0,.6), 0 2px 6px rgba(0,0,0,.5);
+  --line:rgba(255,255,255,.08); --track:rgba(255,255,255,.1); --fill:rgba(255,255,255,.9);
 }}
 *{box-sizing:border-box}
 html{background:var(--bg1)}
-body{margin:0;color:var(--ink);min-height:100vh;
+body{margin:0;color:var(--ink);min-height:100vh;position:relative;overflow-x:hidden;
   font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
-  -webkit-font-smoothing:antialiased;
-  background:radial-gradient(900px 600px at 12% -5%,var(--blob1),transparent 60%),
-             radial-gradient(700px 520px at 105% 18%,var(--blob2),transparent 62%),
-             radial-gradient(800px 700px at 30% 110%,var(--blob2),transparent 60%),
-             linear-gradient(160deg,var(--bg1),var(--bg2));
-  background-attachment:fixed}
-main{max-width:860px;margin:0 auto;padding:18px 16px 56px}
-h1{font-size:26px;letter-spacing:-.02em;margin:6px 0 4px;font-weight:700;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-h2{font-size:12px;margin:0 0 12px;color:var(--ink2);font-weight:600;text-transform:uppercase;letter-spacing:.09em}
+  -webkit-font-smoothing:antialiased;background:linear-gradient(165deg,var(--bg1),var(--bg2)) fixed}
+/* soft light shapes behind the glass, so the clear panels have something to bend */
+body::before,body::after{content:"";position:fixed;z-index:-1;border-radius:50%;filter:blur(60px);pointer-events:none}
+body::before{width:70vmax;height:70vmax;left:-25vmax;top:-30vmax;
+  background:radial-gradient(circle at 40% 40%,var(--orb1),transparent 62%)}
+body::after{width:60vmax;height:60vmax;right:-22vmax;top:25vh;
+  background:radial-gradient(circle at 50% 50%,var(--orb2),transparent 64%),
+             radial-gradient(circle at 20% 90%,var(--orb3),transparent 50%)}
+main{max-width:860px;margin:0 auto;padding:18px 16px 56px;position:relative}
+h1{font-size:28px;letter-spacing:-.025em;margin:6px 0 4px;font-weight:700;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+h2{font-size:12px;margin:0 0 12px;color:var(--ink2);font-weight:600;text-transform:uppercase;letter-spacing:.1em}
 .sub{color:var(--ink2);font-size:13px}
-.card,.stat,input,select,button.ghost,.pill{
-  -webkit-backdrop-filter:blur(26px) saturate(160%);backdrop-filter:blur(26px) saturate(160%)}
-.card{background:var(--glass);border:1px solid var(--edge);border-radius:24px;padding:16px 18px;margin:14px 0;
-  box-shadow:var(--hi),var(--shadow)}
+
+/* ---------- crystal glass ---------- */
+.card,.stat,.pill,input,select,button{position:relative;isolation:isolate;
+  background:linear-gradient(135deg,var(--tint2),var(--tint));
+  -webkit-backdrop-filter:blur(7px) saturate(170%) brightness(1.06);
+  backdrop-filter:blur(7px) saturate(170%) brightness(1.06);
+  border:0;box-shadow:inset 0 0 0 1px var(--rim2),inset 0 1px 18px var(--inner),var(--shadow)}
+/* bright refracted rim: strongest top-left and bottom-right */
+.card::before,.stat::before,.pill::before,button::before{content:"";position:absolute;inset:0;border-radius:inherit;
+  padding:1.3px;pointer-events:none;z-index:1;
+  background:linear-gradient(135deg,var(--rim1) 0%,var(--rim2) 32%,var(--rim2) 62%,var(--rim3) 100%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;
+  mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude}
+/* light sheen across the top, like light on a curved surface */
+.card::after,.stat::after{content:"";position:absolute;left:1px;right:1px;top:1px;height:46%;border-radius:inherit;
+  border-bottom-left-radius:50% 22px;border-bottom-right-radius:50% 22px;pointer-events:none;z-index:-1;
+  background:linear-gradient(180deg,var(--sheen),transparent)}
+.card{border-radius:28px;padding:17px 18px;margin:16px 0}
+.stat{border-radius:18px;padding:12px 14px;box-shadow:inset 0 0 0 1px var(--rim2),inset 0 1px 12px var(--inner)}
 .row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1 1 150px}
-.stat{background:var(--glass2);border:1px solid var(--edge);border-radius:16px;padding:11px 13px;box-shadow:var(--hi)}
-.stat b{display:block;font-size:20px;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.stat b{display:block;font-size:21px;letter-spacing:-.015em;font-variant-numeric:tabular-nums}
 .stat span{font-size:12px;color:var(--ink2)}
-.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;
-  background:var(--glass2);border:1px solid var(--edge);box-shadow:var(--hi);color:var(--ink)}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 11px;border-radius:99px;font-size:12px;font-weight:600;
+  color:var(--ink);box-shadow:inset 0 0 0 1px var(--rim2)}
 .good{font-weight:700}.mute{color:var(--ink2)}
 .bad{font-weight:700;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
 .warn{font-weight:700;text-decoration:underline dotted;text-underline-offset:3px}
-.pill.bad,.pill.warn{text-decoration:none;background:var(--btn);color:var(--btnink);border-color:transparent}
-.bar{height:8px;background:var(--track);border-radius:99px;overflow:hidden;margin:7px 0 3px}
+.pill.bad,.pill.warn{text-decoration:none;font-weight:700;box-shadow:inset 0 0 0 1.5px var(--ink2)}
+.bar{height:7px;background:var(--track);border-radius:99px;overflow:hidden;margin:8px 0 3px;
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.08)}
 .bar i{display:block;height:100%;background:var(--fill);border-radius:99px}
-.pair{border-top:1px solid var(--edge2);padding:12px 0}.pair:first-of-type{border-top:0;padding-top:0}
+.pair{border-top:1px solid var(--line);padding:13px 0}.pair:first-of-type{border-top:0;padding-top:0}
 .pair h3{margin:0;font-size:17px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;letter-spacing:-.01em}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:14px;margin-top:8px}
 .kv dt{color:var(--ink2)}.kv dd{margin:0;font-variant-numeric:tabular-nums}
 table{width:100%;border-collapse:collapse;font-size:14px}
-td,th{text-align:left;padding:8px 4px;border-top:1px solid var(--edge2)}
+td,th{text-align:left;padding:8px 4px;border-top:1px solid var(--line)}
 th{color:var(--ink2);font-weight:500;font-size:12px;border-top:0}
 td.num{text-align:right;font-variant-numeric:tabular-nums}
+td.good,td.bad{text-decoration:none;font-weight:600}td.bad{color:var(--ink2)}
 form{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:10px}
-input,select,button{font:inherit;padding:10px 12px;border-radius:12px;min-width:0;width:100%;color:var(--ink);
-  background:var(--glass2);border:1px solid var(--edge);box-shadow:var(--hi);outline:none}
-input:focus,select:focus{border-color:var(--ink3)}
+input,select,button{font:inherit;padding:10px 13px;border-radius:14px;min-width:0;width:100%;color:var(--ink);outline:none;
+  box-shadow:inset 0 0 0 1px var(--rim2),inset 0 1px 8px var(--inner)}
+input:focus,select:focus{box-shadow:inset 0 0 0 1.5px var(--ink3),inset 0 1px 8px var(--inner)}
 input::placeholder{color:var(--ink3)}
-button{background:var(--btn);color:var(--btnink);border:0;font-weight:600;cursor:pointer;box-shadow:var(--shadow)}
-button.ghost{background:var(--glass2);color:var(--ink);border:1px solid var(--edge);padding:5px 10px;width:auto;
-  font-size:12px;box-shadow:var(--hi)}
+select{-webkit-appearance:none;appearance:none;
+  background-image:linear-gradient(135deg,var(--tint2),var(--tint)),
+    linear-gradient(45deg,transparent 50%,var(--ink2) 50%),linear-gradient(135deg,var(--ink2) 50%,transparent 50%);
+  background-position:0 0,calc(100% - 17px) 52%,calc(100% - 12px) 52%;
+  background-size:100% 100%,5px 5px,5px 5px;background-repeat:no-repeat;padding-right:30px}
+button{font-weight:700;cursor:pointer;letter-spacing:.01em;box-shadow:inset 0 0 0 1px var(--rim2),inset 0 1px 14px var(--inner),var(--shadow)}
+button:active{transform:scale(.98)}
+button.ghost{padding:5px 11px;width:auto;font-size:12px;font-weight:600;
+  box-shadow:inset 0 0 0 1px var(--rim2),inset 0 1px 8px var(--inner)}
 .msg{font-size:13px;margin-top:6px}
-.ev{font-size:14px;padding:8px 0;border-top:1px solid var(--edge2)}.ev:first-child{border-top:0}
+.ev{font-size:14px;padding:8px 0;border-top:1px solid var(--line)}.ev:first-child{border-top:0}
 .tag{display:inline-block;min-width:58px;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--ink2)}
 details summary{cursor:pointer;color:var(--ink2);font-size:13px}
-td.good,td.bad{text-decoration:none;font-weight:600}td.bad{color:var(--ink2)}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .card{background:rgba(255,255,255,.55)}}
 """
 
 
