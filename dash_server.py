@@ -56,6 +56,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Location", BASE)
             self.end_headers()
             return
+        if path == BASE + "bg":
+            try:
+                data = open(dashboard.BG_FILE, "rb").read()
+            except OSError:
+                return self._send(404, "Not found", "text/plain")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "private, max-age=31536000")
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path != BASE:
             return self._send(404, "Not found", "text/plain")
         try:
@@ -64,6 +76,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, f"Dashboard error: {e}", "text/plain")
 
     def do_POST(self):
+        if self.path.split("?", 1)[0] == BASE + "bg":
+            return self._upload_bg()
         if self.path.split("?", 1)[0] != BASE + "api":
             return self._send(404, "Not found", "text/plain")
         try:
@@ -80,6 +94,25 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             ok, msg = False, "Bad request"
         self._send(200 if ok else 400, json.dumps({"ok": ok, "msg": msg}), "application/json")
+
+
+    def _upload_bg(self):
+        """Background photo from the page: already shrunk to a JPEG in the browser."""
+        try:
+            n = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            n = 0
+        if not 0 < n <= 8 * 1024 * 1024:
+            return self._send(400, json.dumps({"ok": False, "msg": "Picture too large (max 8 MB)"}), "application/json")
+        data = self.rfile.read(n)
+        if not data.startswith(b"\xff\xd8\xff"):
+            return self._send(400, json.dumps({"ok": False, "msg": "Not a JPEG picture"}), "application/json")
+        os.makedirs(os.path.dirname(dashboard.BG_FILE), exist_ok=True)
+        tmp = dashboard.BG_FILE + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, dashboard.BG_FILE)
+        self._send(200, json.dumps({"ok": True, "msg": "Background updated"}), "application/json")
 
 
 if __name__ == "__main__":
