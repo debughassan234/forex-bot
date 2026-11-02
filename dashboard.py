@@ -562,6 +562,7 @@ def render(now=None):
              "<input type='file' accept='image/*' id='bgfile' hidden onchange='setBg(this)'></label>"
              + ("<button class='ghost' onclick=\"act({action:'bg_remove'},'Go back to the silver background?')\">"
                 "Back to silver background</button>" if os.path.exists(BG_FILE) else "")
+             + "<button class='ghost' onclick=\"logout()\">Log out</button>"
              + "<span id='bgmsg' class='sub'></span></div></section>")
 
     o.append("<nav class='nav glass'><a href='#overview' class='on'>Overview</a><a href='#pairs'>Pairs</a>"
@@ -601,6 +602,38 @@ def _trade_form(ch):
           f"'This archives the current trades. Continue?')\">{esc(nxt[1])}</button></div>")
 
 
+def login_page(msg="", form=True):
+    """Password screen, same glass look over the silver background."""
+    body = ("<div class='login glass'><div class='avatar'>FB</div><h1>Fib Bot</h1>"
+            "<div class='sub'>Enter your dashboard password</div>")
+    if form:
+        body += ("<form id='lf' onsubmit='login(event)'>"
+                 "<input name='password' type='password' autocomplete='current-password' "
+                 "placeholder='Password' required autofocus aria-label='Password'>"
+                 "<button>Unlock</button></form>")
+    body += f"<div id='lmsg' class='sub' style='min-height:18px'>{esc(msg)}</div></div>"
+    js = """<script>
+async function login(e){
+  e.preventDefault();
+  const m = document.getElementById('lmsg'); m.textContent = 'Checking…';
+  const r = await fetch('login', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({password: e.target.password.value})});
+  const j = await r.json().catch(()=>({ok:false,msg:'Server error'}));
+  if(j.ok) location.reload(); else { m.textContent = j.msg; e.target.password.value=''; }
+}
+</script>"""
+    css = CSS + """
+.login{max-width:360px;margin:18vh auto 0;padding:28px 24px;text-align:center}
+.login .avatar{margin:0 auto 14px;width:52px;height:52px;font-size:17px}
+.login h1{font-size:28px;margin:0 0 4px}.login form{grid-template-columns:1fr;margin:18px 0 8px}"""
+    return ('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
+            '<meta name="robots" content="noindex,nofollow"><title>Fib Bot</title>'
+            f"<style>{css}</style></head><body class='photo'>"
+            "<div class='bg' style=\"background-image:url('bg-default.jpg')\"></div>"
+            f"<main>{body}</main>{js}</body></html>")
+
+
 PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow"><meta name="apple-mobile-web-app-capable" content="yes">
@@ -609,7 +642,13 @@ PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <script>
 async function post(body){
   const r = await fetch('api', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if(r.status === 401){ location.reload(); return {ok:false}; }
   return r.json().catch(()=>({ok:false,msg:'Server error'}));
+}
+async function logout(){
+  if(!confirm('Log out on this device?')) return;
+  await fetch('logout', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+  location.reload();
 }
 async function act(body, ask){
   if(ask && !confirm(ask)) return;
