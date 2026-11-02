@@ -56,6 +56,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Location", BASE)
             self.end_headers()
             return
+        if path == BASE + "bg.jpg":
+            try:
+                data = open(os.path.join(dashboard.BOT_DIR, "assets", "bg.jpg"), "rb").read()
+            except OSError:
+                return self._send(404, "Not found", "text/plain")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=604800")
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path != BASE:
             return self._send(404, "Not found", "text/plain")
         try:

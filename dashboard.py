@@ -241,102 +241,167 @@ def events(n=25):
     return out[-n:][::-1], out
 
 
-# ------------------------------------------------------------------ render
-CSS = """
-:root{
-  --ink:#0b0c0e; --ink2:rgba(11,12,14,.6); --ink3:rgba(11,12,14,.36);
-  --bg1:#dde0e5; --bg2:#b3b8c1; --orb1:rgba(255,255,255,1); --orb2:rgba(62,68,78,.42); --orb3:rgba(255,255,255,.9);
-  --tint:rgba(255,255,255,.04); --tint2:rgba(255,255,255,.12);
-  --rim1:rgba(255,255,255,1); --rim2:rgba(255,255,255,.15); --rim3:rgba(255,255,255,.65);
-  --sheen:rgba(255,255,255,.42); --inner:rgba(255,255,255,.28);
-  --shadow:0 18px 50px rgba(30,34,40,.16), 0 2px 6px rgba(30,34,40,.08);
-  --line:rgba(11,12,14,.08); --track:rgba(11,12,14,.09); --fill:rgba(11,12,14,.8);
-}
-@media (prefers-color-scheme:dark){:root{
-  --ink:#f5f6f8; --ink2:rgba(245,246,248,.62); --ink3:rgba(245,246,248,.36);
-  --bg1:#07080a; --bg2:#121418; --orb1:rgba(255,255,255,.22); --orb2:rgba(255,255,255,.07); --orb3:rgba(255,255,255,.14);
-  --tint:rgba(255,255,255,.035); --tint2:rgba(255,255,255,.05);
-  --rim1:rgba(255,255,255,.55); --rim2:rgba(255,255,255,.05); --rim3:rgba(255,255,255,.28);
-  --sheen:rgba(255,255,255,.12); --inner:rgba(255,255,255,.06);
-  --shadow:0 20px 60px rgba(0,0,0,.6), 0 2px 6px rgba(0,0,0,.5);
-  --line:rgba(255,255,255,.08); --track:rgba(255,255,255,.1); --fill:rgba(255,255,255,.9);
-}}
-*{box-sizing:border-box}
-html{background:var(--bg1)}
-body{margin:0;color:var(--ink);min-height:100vh;position:relative;overflow-x:hidden;
-  font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
-  -webkit-font-smoothing:antialiased;background:linear-gradient(165deg,var(--bg1),var(--bg2)) fixed}
-/* soft light shapes behind the glass, so the clear panels have something to bend */
-body::before,body::after{content:"";position:fixed;z-index:-1;border-radius:50%;filter:blur(60px);pointer-events:none}
-body::before{width:70vmax;height:70vmax;left:-25vmax;top:-30vmax;
-  background:radial-gradient(circle at 40% 40%,var(--orb1),transparent 62%)}
-body::after{width:60vmax;height:60vmax;right:-22vmax;top:25vh;
-  background:radial-gradient(circle at 50% 50%,var(--orb2),transparent 64%),
-             radial-gradient(circle at 20% 90%,var(--orb3),transparent 50%)}
-main{max-width:860px;margin:0 auto;padding:18px 16px 56px;position:relative}
-h1{font-size:28px;letter-spacing:-.025em;margin:6px 0 4px;font-weight:700;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-h2{font-size:12px;margin:0 0 12px;color:var(--ink2);font-weight:600;text-transform:uppercase;letter-spacing:.1em}
-.sub{color:var(--ink2);font-size:13px}
 
-/* ---------- crystal glass ---------- */
-.card,.stat,.pill,input,select,button{position:relative;isolation:isolate;
-  background:linear-gradient(135deg,var(--tint2),var(--tint));
-  -webkit-backdrop-filter:blur(7px) saturate(170%) brightness(1.06);
-  backdrop-filter:blur(7px) saturate(170%) brightness(1.06);
-  border:0;box-shadow:inset 0 0 0 1px var(--rim2),inset 0 1px 18px var(--inner),var(--shadow)}
-/* bright refracted rim: strongest top-left and bottom-right */
-.card::before,.stat::before,.pill::before,button::before{content:"";position:absolute;inset:0;border-radius:inherit;
-  padding:1.3px;pointer-events:none;z-index:1;
-  background:linear-gradient(135deg,var(--rim1) 0%,var(--rim2) 32%,var(--rim2) 62%,var(--rim3) 100%);
-  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;
-  mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude}
-/* light sheen across the top, like light on a curved surface */
-.card::after,.stat::after{content:"";position:absolute;left:1px;right:1px;top:1px;height:46%;border-radius:inherit;
-  border-bottom-left-radius:50% 22px;border-bottom-right-radius:50% 22px;pointer-events:none;z-index:-1;
-  background:linear-gradient(180deg,var(--sheen),transparent)}
-.card{border-radius:28px;padding:17px 18px;margin:16px 0}
-.stat{border-radius:18px;padding:12px 14px;box-shadow:inset 0 0 0 1px var(--rim2),inset 0 1px 12px var(--inner)}
-.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1 1 150px}
-.stat b{display:block;font-size:21px;letter-spacing:-.015em;font-variant-numeric:tabular-nums}
-.stat span{font-size:12px;color:var(--ink2)}
-.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 11px;border-radius:99px;font-size:12px;font-weight:600;
-  color:var(--ink);box-shadow:inset 0 0 0 1px var(--rim2)}
-.good{font-weight:700}.mute{color:var(--ink2)}
-.bad{font-weight:700;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
-.warn{font-weight:700;text-decoration:underline dotted;text-underline-offset:3px}
-.pill.bad,.pill.warn{text-decoration:none;font-weight:700;box-shadow:inset 0 0 0 1.5px var(--ink2)}
-.bar{height:7px;background:var(--track);border-radius:99px;overflow:hidden;margin:8px 0 3px;
-  box-shadow:inset 0 1px 2px rgba(0,0,0,.08)}
+
+# ------------------------------------------------------------------ render
+ICON = {  # small monochrome line icons
+    "wallet": '<path d="M3 7h15a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7zm0 0V6a2 2 0 0 1 2-2h11"/><circle cx="16" cy="13" r="1.2"/>',
+    "target": '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/>',
+    "shield": '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z"/><path d="M9 12h6"/>',
+    "cal": '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>',
+    "floor": '<path d="M4 18h16"/><path d="M6 14l4-4 3 3 5-6"/>',
+    "pulse": '<path d="M3 12h4l2-6 4 12 2-6h6"/>',
+}
+
+
+def icon(name):
+    return (f"<span class='ico'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' "
+            f"stroke-linecap='round' stroke-linejoin='round'>{ICON[name]}</svg></span>")
+
+
+def equity_svg(ch):
+    """Smooth balance curve from the trades entered, with start and target lines."""
+    acc = CHALLENGE["account"]
+    pts = [acc]
+    for x in ch["trades"]:
+        pts.append(pts[-1] + x["pnl"])
+    target = acc + ch["target"] if ch["target"] else None
+    lo = min(pts) - 20
+    hi = max(pts + ([target] if target else [acc + 60]))
+    lo, hi = min(lo, acc - 30), max(hi, acc + 30)
+    W, H, pad = 600, 220, 14
+    n = max(len(pts) - 1, 1)
+    X = lambda i: pad + (W - 2 * pad) * (i / n)
+    Y = lambda v: pad + (H - 2 * pad) * (1 - (v - lo) / (hi - lo))
+    xy = [(X(i), Y(v)) for i, v in enumerate(pts)] if len(pts) > 1 else [(X(0), Y(acc)), (X(1), Y(acc))]
+    d = f"M{xy[0][0]:.1f},{xy[0][1]:.1f}"
+    for i in range(1, len(xy)):          # Catmull-Rom → Bezier for a soft line
+        p0 = xy[max(i - 2, 0)]; p1 = xy[i - 1]; p2 = xy[i]; p3 = xy[min(i + 1, len(xy) - 1)]
+        c1 = (p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6)
+        c2 = (p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6)
+        d += f" C{c1[0]:.1f},{c1[1]:.1f} {c2[0]:.1f},{c2[1]:.1f} {p2[0]:.1f},{p2[1]:.1f}"
+    area = d + f" L{xy[-1][0]:.1f},{H - pad} L{xy[0][0]:.1f},{H - pad} Z"
+    guides = f"<line x1='{pad}' x2='{W - pad}' y1='{Y(acc):.1f}' y2='{Y(acc):.1f}' class='g'/>"
+    labels = (f"<span class='cl' style='left:0;top:calc({100 * Y(acc) / H:.1f}% + 4px)'>start {money(acc)}</span>")
+    if target:
+        guides += f"<line x1='{pad}' x2='{W - pad}' y1='{Y(target):.1f}' y2='{Y(target):.1f}' class='g dash'/>"
+        labels += (f"<span class='cl' style='right:0;top:calc({100 * Y(target) / H:.1f}% - 20px)'>"
+                   f"target {money(target)}</span>")
+    dots = "".join(f"<line x1='{x:.1f}' y1='{y:.1f}' x2='{x:.1f}' y2='{y:.1f}' class='dot'/>"
+                   for x, y in xy[1:]) if len(pts) > 1 else ""
+    return (f"<div class='cw'>{labels}<svg class='chart' viewBox='0 0 {W} {H}' preserveAspectRatio='none' role='img' "
+            f"aria-label='Balance after each trade'><defs><linearGradient id='fa' x1='0' y1='0' x2='0' y2='1'>"
+            f"<stop offset='0' class='fa0'/><stop offset='1' class='fa1'/></linearGradient></defs>"
+            f"{guides}<path d='{area}' fill='url(#fa)'/><path d='{d}' class='ln'/>{dots}</svg></div>")
+
+
+def ring_svg(frac, big, small):
+    frac = max(0.0, min(1.0, frac))
+    r, c = 52, 2 * 3.14159 * 52
+    return (f"<div class='ring'><svg viewBox='0 0 140 140'><circle cx='70' cy='70' r='{r}' class='rt'/>"
+            f"<circle cx='70' cy='70' r='{r}' class='rf' stroke-dasharray='{c * frac:.1f} {c:.1f}' "
+            f"transform='rotate(-90 70 70)'/></svg><div class='rc'><b>{big}</b><span>{small}</span></div></div>")
+
+
+CSS = """
+:root{--ink:#0c0d0f;--ink2:rgba(12,13,15,.62);--ink3:rgba(12,13,15,.38);
+  --glass:rgba(255,255,255,.30);--glass2:rgba(255,255,255,.38);--edge:rgba(255,255,255,.62);
+  --line:rgba(12,13,15,.09);--shadow:0 20px 50px rgba(0,0,0,.18),0 2px 6px rgba(0,0,0,.08);
+  --hi:inset 0 1px 0 rgba(255,255,255,.85);--bgdim:1;--fill:rgba(12,13,15,.85);--track:rgba(12,13,15,.10);
+  --solid:#0c0d0f;--solidink:#fff}
+@media (prefers-color-scheme:dark){:root{--ink:#f4f5f7;--ink2:rgba(244,245,247,.66);--ink3:rgba(244,245,247,.4);
+  --glass:rgba(255,255,255,.08);--glass2:rgba(255,255,255,.11);--edge:rgba(255,255,255,.16);
+  --line:rgba(255,255,255,.09);--shadow:0 20px 60px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.4);
+  --hi:inset 0 1px 0 rgba(255,255,255,.14);--bgdim:.32;--fill:rgba(255,255,255,.92);--track:rgba(255,255,255,.12);
+  --solid:#f4f5f7;--solidink:#0c0d0f}}
+*{box-sizing:border-box}
+html{background:#8d8f92}
+body{margin:0;color:var(--ink);min-height:100vh;overflow-x:hidden;
+  font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.bg{position:fixed;inset:-40px;z-index:-1;background:url('bg.jpg') center/cover no-repeat;
+  filter:brightness(var(--bgdim)) contrast(1.05)}
+main{max-width:1180px;margin:0 auto;padding:16px 16px 120px}
+.glass{background:var(--glass);border:1px solid var(--edge);border-radius:24px;box-shadow:var(--hi),var(--shadow);
+  -webkit-backdrop-filter:blur(26px) saturate(150%);backdrop-filter:blur(26px) saturate(150%)}
+.top{display:flex;align-items:center;gap:12px;padding:8px 10px 8px 8px;border-radius:99px;margin-bottom:22px}
+.avatar{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:13px;
+  background:var(--solid);color:var(--solidink);flex:none}
+.top .who{flex:1;min-width:0;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top .who span{color:var(--ink2);font-weight:500}
+.status{padding:6px 12px;border-radius:99px;font-size:12px;font-weight:700;background:var(--glass2);border:1px solid var(--edge);white-space:nowrap}
+.status.bad{background:var(--solid);color:var(--solidink);border-color:transparent}
+.head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:0 4px 16px}
+h1{font-size:34px;letter-spacing:-.03em;margin:0;line-height:1.1}
+.sub{color:var(--ink2);font-size:13px}
+.seg{display:flex;gap:4px;padding:4px;border-radius:99px}
+.seg span{padding:6px 12px;border-radius:99px;font-size:12px;font-weight:600;color:var(--ink2)}
+.seg span.on{background:var(--solid);color:var(--solidink)}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.kpi{padding:16px;border-radius:22px;min-width:0}
+.kpi .lab{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink2);font-weight:500}
+.ico{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--glass2);
+  border:1px solid var(--edge);color:var(--ink);flex:none}.ico svg{width:16px;height:16px}
+.kpi b{display:block;font-size:30px;letter-spacing:-.03em;margin:12px 0 6px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.chip{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:var(--solid);color:var(--solidink)}
+.chip.soft{background:var(--glass2);color:var(--ink);border:1px solid var(--edge)}
+.kpi .note{display:block;font-size:12px;color:var(--ink2);margin-top:7px}
+.bar{height:6px;background:var(--track);border-radius:99px;overflow:hidden;margin-top:10px}
 .bar i{display:block;height:100%;background:var(--fill);border-radius:99px}
-.pair{border-top:1px solid var(--line);padding:13px 0}.pair:first-of-type{border-top:0;padding-top:0}
-.pair h3{margin:0;font-size:17px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;letter-spacing:-.01em}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:14px;margin-top:8px}
-.kv dt{color:var(--ink2)}.kv dd{margin:0;font-variant-numeric:tabular-nums}
+.grid{display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-top:14px}
+.grid.even{grid-template-columns:1fr 1fr}
+.card{padding:18px;min-width:0}
+.card h2{font-size:16px;margin:0;letter-spacing:-.01em}
+.card .sub{margin-bottom:12px}
+.chart{width:100%;height:220px;display:block;overflow:visible}
+.chart .ln{fill:none;stroke:var(--ink);stroke-width:2.4;vector-effect:non-scaling-stroke}
+.chart .dot{stroke:var(--ink);stroke-width:7;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.chart .g{stroke:var(--ink3);stroke-width:1;vector-effect:non-scaling-stroke}.chart .dash{stroke-dasharray:5 5}
+.cw{position:relative}.cl{position:absolute;font-size:11.5px;color:var(--ink2);padding:1px 7px;border-radius:99px;background:var(--glass2);border:1px solid var(--edge);white-space:nowrap;z-index:1}
+.fa0{stop-color:var(--ink);stop-opacity:.16}.fa1{stop-color:var(--ink);stop-opacity:0}
+.ring{position:relative;width:180px;height:180px;margin:6px auto 10px}.ring svg{width:100%;height:100%}
+.ring .rt{fill:none;stroke:var(--track);stroke-width:14}
+.ring .rf{fill:none;stroke:var(--fill);stroke-width:14;stroke-linecap:round}
+.rc{position:absolute;inset:0;display:grid;place-content:center;text-align:center}
+.rc b{font-size:26px;letter-spacing:-.02em}.rc span{font-size:12px;color:var(--ink2)}
+.legend div{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-top:1px solid var(--line)}
+.legend div:first-child{border-top:0}.legend span{color:var(--ink2)}
+.pairs{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.pair{padding:14px;border-radius:18px;background:var(--glass2);border:1px solid var(--edge);box-shadow:var(--hi)}
+.pair h3{margin:0 0 2px;font-size:16px;display:flex;justify-content:space-between;align-items:center;gap:6px}
+.pair .tagb{white-space:nowrap;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--solid);color:var(--solidink)}
+.pair .tagb.soft{background:transparent;color:var(--ink2);border:1px solid var(--line)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:13px;margin-top:8px}
+.kv dt{color:var(--ink2)}.kv dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.big{font-size:22px;font-weight:700;letter-spacing:-.02em;margin-top:6px;font-variant-numeric:tabular-nums}
 table{width:100%;border-collapse:collapse;font-size:14px}
-td,th{text-align:left;padding:8px 4px;border-top:1px solid var(--line)}
-th{color:var(--ink2);font-weight:500;font-size:12px;border-top:0}
-td.num{text-align:right;font-variant-numeric:tabular-nums}
-td.good,td.bad{text-decoration:none;font-weight:600}td.bad{color:var(--ink2)}
-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:10px}
-input,select,button{font:inherit;padding:10px 13px;border-radius:14px;min-width:0;width:100%;color:var(--ink);outline:none;
-  box-shadow:inset 0 0 0 1px var(--rim2),inset 0 1px 8px var(--inner)}
-input:focus,select:focus{box-shadow:inset 0 0 0 1.5px var(--ink3),inset 0 1px 8px var(--inner)}
-input::placeholder{color:var(--ink3)}
-select{-webkit-appearance:none;appearance:none;
-  background-image:linear-gradient(135deg,var(--tint2),var(--tint)),
-    linear-gradient(45deg,transparent 50%,var(--ink2) 50%),linear-gradient(135deg,var(--ink2) 50%,transparent 50%);
-  background-position:0 0,calc(100% - 17px) 52%,calc(100% - 12px) 52%;
-  background-size:100% 100%,5px 5px,5px 5px;background-repeat:no-repeat;padding-right:30px}
-button{font-weight:700;cursor:pointer;letter-spacing:.01em;box-shadow:inset 0 0 0 1px var(--rim2),inset 0 1px 14px var(--inner),var(--shadow)}
-button:active{transform:scale(.98)}
-button.ghost{padding:5px 11px;width:auto;font-size:12px;font-weight:600;
-  box-shadow:inset 0 0 0 1px var(--rim2),inset 0 1px 8px var(--inner)}
-.msg{font-size:13px;margin-top:6px}
-.ev{font-size:14px;padding:8px 0;border-top:1px solid var(--line)}.ev:first-child{border-top:0}
-.tag{display:inline-block;min-width:58px;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--ink2)}
-details summary{cursor:pointer;color:var(--ink2);font-size:13px}
-@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
-  .card{background:rgba(255,255,255,.55)}}
+td,th{text-align:left;padding:9px 4px;border-top:1px solid var(--line)}th{color:var(--ink2);font-weight:500;font-size:12px;border-top:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums}td.neg{color:var(--ink2)}
+.ev{display:flex;gap:10px;align-items:flex-start;font-size:14px;padding:10px 0;border-top:1px solid var(--line)}
+.ev:first-of-type{border-top:0}.ev .tg{font-size:10.5px;font-weight:800;letter-spacing:.06em;padding:3px 7px;border-radius:7px;
+  background:var(--glass2);border:1px solid var(--edge);white-space:nowrap}.ev .tg.solid{background:var(--solid);color:var(--solidink);border-color:transparent}
+.ev .t{color:var(--ink2);font-size:12px}
+form{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin:12px 0}
+input,select,button{font:inherit;padding:11px 13px;border-radius:14px;min-width:0;width:100%;color:var(--ink);outline:none;
+  background:var(--glass2);border:1px solid var(--edge);box-shadow:var(--hi)}
+input::placeholder{color:var(--ink3)}input:focus,select:focus{border-color:var(--ink3)}
+button{background:var(--solid);color:var(--solidink);border:0;font-weight:700;cursor:pointer}
+button.ghost{background:var(--glass2);color:var(--ink);border:1px solid var(--edge);width:auto;padding:5px 11px;font-size:12px;font-weight:600}
+.msg{font-size:13px}
+.done{padding:10px 12px;border-radius:14px;background:var(--solid);color:var(--solidink);font-weight:700;margin:10px 0}
+.hgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.hgrid>div{padding:12px 14px;border-radius:16px;background:var(--glass2);border:1px solid var(--edge)}
+.hgrid b{display:block;font-size:20px;letter-spacing:-.02em}.hgrid span{font-size:12px;color:var(--ink2)}
+.warnline{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
+.nav{position:fixed;left:50%;bottom:max(14px,env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;gap:2px;
+  padding:6px;border-radius:99px;z-index:5;max-width:calc(100vw - 24px);overflow-x:auto;scrollbar-width:none}
+.nav::-webkit-scrollbar{display:none}
+.nav a{padding:9px 14px;border-radius:99px;font-size:13px;font-weight:600;color:var(--ink2);text-decoration:none;white-space:nowrap}
+.nav a.on{background:var(--solid);color:var(--solidink)}
+section{scroll-margin-top:16px}
+@media (max-width:900px){.kpis,.pairs,.hgrid{grid-template-columns:1fr 1fr}.grid,.grid.even{grid-template-columns:1fr}
+  h1{font-size:30px}.kpi b{font-size:24px}}
+@media (max-width:600px){.pairs{grid-template-columns:1fr}}
+@media (max-width:380px){.kpi b{font-size:21px}.kpi{padding:13px}}
 """
 
 
@@ -347,160 +412,181 @@ def render(now=None):
     ch = challenge_view(now)
     recent, all_ev = events()
     acc = CHALLENGE["account"]
+    o = []
 
-    # header
-    state = ("<span class='pill'>● Running</span>" if h["ok"] else
-             "<span class='pill bad'>⚠︎ Check the bot</span>")
-    parts = [f"<h1>Fib Bot {state}</h1>",
-             f"<div class='sub'>Updated {esc(lagos(now, '%H:%M:%S'))} Lagos · last check "
-             f"{esc(ago(h['last'], now))} · refreshes every minute</div>"]
+    status = ("<span class='status'>● Running</span>" if h["ok"] else
+              "<span class='status bad'>⚠︎ Check the bot</span>")
+    o.append(f"<div class='top glass'><div class='avatar'>FB</div><div class='who'>Fib Bot "
+             f"<span>· {esc(ago(h['last'], now))}</span></div>{status}</div>")
+    phase = "Funded" if ch["funded"] else f"Phase {ch['phase']}"
+    o.append(f"<div class='head' id='overview'><div><h1>Overview</h1><div class='sub'>FundedNext 2-Step · "
+             f"{money(acc)} · updated {esc(lagos(now, '%H:%M'))} Lagos</div></div>"
+             f"<div class='seg glass'>" + "".join(
+                 f"<span class='{'on' if (p == phase) else ''}'>{p}</span>" for p in ("Phase 1", "Phase 2", "Funded"))
+             + "</div></div>")
 
-    # challenge
-    if ch["funded"]:
-        title = "FundedNext · funded account"
-        prog = ""
-    else:
-        pct = max(0, min(100, 100 * ch["profit"] / ch["target"])) if ch["target"] else 0
-        left = ch["target"] - ch["profit"]
-        prog = (f"<div class='sub'>Profit target {money(ch['target'])} · "
-                f"{'<b class=good>reached</b>' if left <= 0 else money(left) + ' to go'}</div>"
-                f"<div class='bar'><i style='width:{pct:.0f}%'></i></div>")
-        title = f"FundedNext 2-Step · Phase {ch['phase']}"
-    used_pct = min(100, 100 * ch["used"] / ch["daily_limit"])
+    # KPI cards
+    left = ch["target"] - ch["profit"]
+    pct = max(0, min(100, 100 * ch["profit"] / ch["target"])) if ch["target"] else 0
     own = CHALLENGE["own_daily_stop"]
-    dclass = "bad" if ch["used"] >= own else ("warn" if ch["used"] >= own / 2 else "good")
-    days_ok = ch["days"] >= CHALLENGE["min_days"]
-    done = (not ch["funded"] and ch["profit"] >= ch["target"] and days_ok)
-    parts.append(f"<section class='card'><h2>{esc(title)}</h2>{prog}<div class='row'>"
-                 f"<div class='stat'><b>{money(ch['balance'])}</b><span>balance ({money(ch['profit'], True)})</span></div>"
-                 f"<div class='stat'><b class='{dclass}'>{money(ch['used'])} / {money(ch['daily_limit'])}</b>"
-                 f"<span>lost today · your stop {money(own)}</span>"
-                 f"<div class='bar'><i style='width:{used_pct:.0f}%'></i></div></div>"
-                 f"<div class='stat'><b>{money(ch['room'])}</b><span>room above the {money(ch['floor'])} floor</span></div>"
-                 f"<div class='stat'><b class='{'good' if days_ok else ''}'>{ch['days']} / {CHALLENGE['min_days']}</b>"
-                 f"<span>trading days</span></div></div>"
-                 f"<div class='sub' style='margin-top:8px'>Daily limit resets {esc(lagos(ch['reset'], '%a %H:%M'))} Lagos · "
-                 f"{ch['wins']} win{'' if ch['wins'] == 1 else 's'}, {ch['losses']} loss{'' if ch['losses'] == 1 else 'es'}</div>"
-                 + ("<p><b>✓ Phase target and trading days met — check your FundedNext dashboard.</b></p>" if done else "")
-                 + _trade_form(ch) + "</section>")
+    used_pct = min(100, 100 * ch["used"] / ch["daily_limit"])
+    stop_chip = ("<span class='chip'>stop for today</span>" if ch["used"] >= own else
+                 f"<span class='chip soft'>{money(own - ch['used'])} to your stop</span>")
+    tgt_chip = ("<span class='chip'>reached</span>" if (not ch["funded"] and left <= 0)
+                else f"<span class='chip soft'>{money(max(left, 0))} to go</span>" if not ch["funded"] else "")
+    o.append("<div class='kpis'>"
+             f"<div class='kpi glass'><div class='lab'>{icon('wallet')}Balance</div><b>{money(ch['balance'])}</b>"
+             f"<span class='chip soft'>{money(ch['profit'], True)}</span><span class='note'>this phase</span></div>"
+             f"<div class='kpi glass'><div class='lab'>{icon('target')}Profit target</div>"
+             f"<b>{pct:.0f}%</b>{tgt_chip}<span class='note'>of {money(ch['target'])}</span>"
+             f"<div class='bar'><i style='width:{pct:.0f}%'></i></div></div>"
+             f"<div class='kpi glass'><div class='lab'>{icon('shield')}Lost today</div>"
+             f"<b class='{'warnline' if ch['used'] >= own else ''}'>{money(ch['used'])}</b>{stop_chip}"
+             f"<span class='note'>limit {money(ch['daily_limit'])}</span>"
+             f"<div class='bar'><i style='width:{used_pct:.0f}%'></i></div></div>"
+             f"<div class='kpi glass'><div class='lab'>{icon('cal')}Trading days</div>"
+             f"<b>{ch['days']} / {CHALLENGE['min_days']}</b>"
+             f"<span class='chip {'' if ch['days'] >= CHALLENGE['min_days'] else 'soft'}'>"
+             f"{'done' if ch['days'] >= CHALLENGE['min_days'] else str(CHALLENGE['min_days'] - ch['days']) + ' more'}</span>"
+             f"<span class='note'>resets {esc(lagos(ch['reset'], '%H:%M'))}</span></div></div>")
+
+    # chart + ring
+    ring = ring_svg((ch["profit"] / ch["target"]) if ch["target"] else 0,
+                    money(max(ch["profit"], 0)), f"of {money(ch['target'])} target" if ch["target"] else "profit")
+    o.append("<div class='grid'>"
+             f"<div class='card glass'><h2>Balance after each trade</h2>"
+             f"<div class='sub'>{len(ch['trades'])} trade{'' if len(ch['trades']) == 1 else 's'} entered · "
+             f"{ch['wins']} win{'' if ch['wins'] == 1 else 's'}, {ch['losses']} loss{'' if ch['losses'] == 1 else 'es'}</div>"
+             f"{equity_svg(ch)}</div>"
+             f"<div class='card glass'><h2>Progress</h2><div class='sub'>Toward this phase's target</div>{ring}"
+             f"<div class='legend'><div><span>Room above floor</span><b>{money(ch['room'])}</b></div>"
+             f"<div><span>Floor</span><b>{money(ch['floor'])}</b></div>"
+             f"<div><span>Today</span><b>{money(ch['today_pnl'], True)}</b></div></div></div></div>")
 
     # pairs
-    rows = []
     stp = {p["sym"]: p for p in st.get("pairs", [])}
-    st_t = parse_t(st.get("t", ""))
+    cards = []
     for sym in PAIRS:
         p = stp.get(sym, {})
         bias = p.get("bias")
         line = p.get("line", "no data yet").split(": ", 1)[-1]
-        badge = ""
+        tag = ""
         if p.get("in_zone"):
-            badge = "<span class='pill warn'>in zone</span>"
-        if bias:
-            badge = f"<span class='pill'>{'▲ bullish' if bias == 'bullish' else '▼ bearish'}</span>" + badge
-        kv = ""
-        z = p.get("zone")
+            tag = "<span class='tagb'>IN ZONE</span>"
+        elif bias:
+            tag = f"<span class='tagb soft'>{'▲ bullish' if bias == 'bullish' else '▼ bearish'}</span>"
         price = p.get("price")
+        z = p.get("zone")
+        body = f"<div class='big'>{fmt(sym, price)}</div>" if price else ""
         if z:
             need = p.get("need")
-            side = "SELL" if bias == "bearish" else "BUY"
+            side = "Sell" if bias == "bearish" else "Buy"
             reach = (price >= need) if bias == "bearish" else (price <= need)
-            dist = (f"<span class='good'>reached</span>" if reach
-                    else f"{pips(sym, need - price)} away")
-            kv = (f"<dl class='kv'><dt>Price</dt><dd>{fmt(sym, price)}</dd>"
-                  f"<dt>Golden zone</dt><dd>{fmt(sym, z['z_bot'])} – {fmt(sym, z['z_top'])}</dd>"
-                  f"<dt>{side} needs</dt><dd>{fmt(sym, need)} {'or higher' if side == 'SELL' else 'or lower'} · {dist}</dd>"
-                  f"<dt>Plan</dt><dd>SL {fmt(sym, z['sl'])} · TP1 {fmt(sym, z['tp1'])} · TP2 {fmt(sym, z['tp2'])}</dd></dl>")
-        elif price:
-            kv = f"<dl class='kv'><dt>Price</dt><dd>{fmt(sym, price)}</dd></dl>"
-        rows.append(f"<div class='pair'><h3>{esc(sym)} {badge}</h3><div class='sub'>{esc(line)}</div>{kv}</div>")
-    parts.append(f"<section class='card'><h2>Pairs</h2>{''.join(rows)}"
-                 f"<div class='sub' style='margin-top:8px'>As of {esc(lagos(st_t, '%H:%M'))} Lagos</div></section>")
+            body += (f"<dl class='kv'><dt>Zone</dt><dd>{fmt(sym, z['z_bot'])}–{fmt(sym, z['z_top'])}</dd>"
+                     f"<dt>{side} needs</dt><dd>{fmt(sym, need)}</dd>"
+                     f"<dt>Distance</dt><dd>{'reached' if reach else pips(sym, need - price)}</dd>"
+                     f"<dt>SL / TP1</dt><dd>{fmt(sym, z['sl'])} / {fmt(sym, z['tp1'])}</dd></dl>")
+        cards.append(f"<div class='pair'><h3>{esc(sym)}{tag}</h3><div class='sub'>{esc(line)}</div>{body}</div>")
+    st_t = parse_t(st.get("t", ""))
+    o.append(f"<section id='pairs' class='card glass' style='margin-top:14px'><h2>Pairs</h2>"
+             f"<div class='sub'>Live read as of {esc(lagos(st_t, '%H:%M'))} Lagos</div>"
+             f"<div class='pairs'>{''.join(cards)}</div></section>")
 
-    # alerts and trades
-    open_rows = "".join(
-        f"<tr><td>{esc(t['sym'])}</td><td>{'Buy' if t['dir'] == 'bullish' else 'Sell'}</td>"
-        f"<td class='num'>{fmt(t['sym'], t['entry'])}</td><td class='num'>{fmt(t['sym'], t['sl'])}</td>"
-        f"<td class='num'>{fmt(t['sym'], t['tp1'])}{' ✓' if t.get('hit_tp1') else ''}</td></tr>"
-        for t in h["open"])
-    open_html = (f"<table><tr><th>Pair</th><th>Side</th><th class='num'>Entry</th><th class='num'>SL</th>"
-                 f"<th class='num'>TP1</th></tr>{open_rows}</table>" if open_rows
-                 else "<div class='sub'>No signals being tracked right now.</div>")
-    ev_html = []
+    # alerts + tracked signals
+    ev = []
     for e in recent:
         t = parse_t(e.get("t", ""))
         sym = e.get("sym", "")
         if e["kind"] == "armed":
-            txt = (f"<span class='tag'>ZONE</span><b>{esc(sym)}</b> zone armed ({'sell' if e.get('dir') == 'bearish' else 'buy'} side) · "
-                   f"signal needs {fmt(sym, e.get('need'))}")
+            tg, txt = "<span class='tg'>ZONE</span>", (f"<b>{esc(sym)}</b> entered its zone · "
+                       f"{'sell' if e.get('dir') == 'bearish' else 'buy'} needs {fmt(sym, e.get('need'))}")
         elif e["kind"] == "entry":
-            txt = (f"<span class='tag'>{'▼ SELL' if e.get('dir') == 'bearish' else '▲ BUY'}</span><b>{esc(sym)}</b> at {fmt(sym, e.get('price'))} · "
-                   f"SL {fmt(sym, e.get('sl'))} · TP1 {fmt(sym, e.get('tp1'))} · {esc(e.get('lots'))} lots · RR {esc(e.get('rr'))}")
+            tg = f"<span class='tg solid'>{'▼ SELL' if e.get('dir') == 'bearish' else '▲ BUY'}</span>"
+            txt = (f"<b>{esc(sym)}</b> at {fmt(sym, e.get('price'))} · SL {fmt(sym, e.get('sl'))} · "
+                   f"TP1 {fmt(sym, e.get('tp1'))} · {esc(e.get('lots'))} lots")
         elif e["kind"] == "closed":
             r = e.get("R") or 0
-            txt = (f"<span class='tag'>{'✓ WIN' if r > 0 else '✕ LOSS'}</span><b>{esc(sym)}</b> closed: {esc(e.get('result'))} "
-                   f"<span class='{'good' if r > 0 else 'bad'}'>{r:+.2f}R</span>")
+            tg = f"<span class='tg {'solid' if r > 0 else ''}'>{'✓ WIN' if r > 0 else '✕ LOSS'}</span>"
+            txt = f"<b>{esc(sym)}</b> {esc(e.get('result'))} · {r:+.2f}R"
         else:
             continue
-        ev_html.append(f"<div class='ev'><span class='mute'>{esc(lagos(t))}</span><br>{txt}</div>")
+        ev.append(f"<div class='ev'>{tg}<div>{txt}<div class='t'>{esc(lagos(t))}</div></div></div>")
+    opn = "".join(
+        f"<tr><td>{esc(t['sym'])}</td><td>{'Buy' if t['dir'] == 'bullish' else 'Sell'}</td>"
+        f"<td class='num'>{fmt(t['sym'], t['entry'])}</td><td class='num'>{fmt(t['sym'], t['sl'])}</td>"
+        f"<td class='num'>{fmt(t['sym'], t['tp1'])}{' ✓' if t.get('hit_tp1') else ''}</td></tr>" for t in h["open"])
     closed = [e for e in all_ev if e.get("kind") == "closed"]
-    tot = sum(e.get("R") or 0 for e in closed)
-    summary = (f"<div class='sub'>Signals closed: {len(closed)} · total {tot:+.2f}R</div>" if closed else "")
-    parts.append(f"<section class='card'><h2>Signals being tracked</h2>{open_html}</section>"
-                 f"<section class='card'><h2>Recent alerts</h2>{summary}"
-                 f"{''.join(ev_html) or '<div class=sub>No alerts recorded yet.</div>'}</section>")
+    o.append("<div class='grid even'>"
+             f"<section id='alerts' class='card glass'><h2>Recent alerts</h2><div class='sub'>"
+             f"{len(closed)} signal{'' if len(closed) == 1 else 's'} closed · "
+             f"{sum(e.get('R') or 0 for e in closed):+.2f}R total</div>"
+             f"{''.join(ev) or '<div class=sub>No alerts recorded yet.</div>'}</section>"
+             f"<div class='card glass'><h2>Signals being tracked</h2><div class='sub'>Followed to TP / SL automatically</div>"
+             + (f"<table><tr><th>Pair</th><th>Side</th><th class='num'>Entry</th><th class='num'>SL</th>"
+                f"<th class='num'>TP1</th></tr>{opn}</table>" if opn else "<div class='sub'>Nothing open right now.</div>")
+             + "</div></div>")
+
+    # trades / tracker
+    o.append(f"<section id='trades' class='card glass' style='margin-top:14px'><h2>Your trades</h2>"
+             f"<div class='sub'>Enter each closed trade from MT5 · {esc(phase)}</div>"
+             + ("<div class='done'>✓ Target and trading days met — check your FundedNext dashboard.</div>"
+                if (not ch["funded"] and left <= 0 and ch["days"] >= CHALLENGE["min_days"]) else "")
+             + _trade_form(ch) + "</section>")
 
     # health
     age = h["age"]
-    age_cls = "good" if age is not None and age <= 3 else "bad"
-    parts.append(
-        "<section class='card'><h2>Bot health</h2><div class='row'>"
-        f"<div class='stat'><b class='{age_cls}'>{esc(ago(h['last'], now))}</b><span>last check</span></div>"
-        f"<div class='stat'><b class='{'good' if h['runs'] >= 50 else 'warn'}'>{h['runs']} / 60</b><span>checks last hour</span></div>"
-        f"<div class='stat'><b class='{'good' if h['hiccups'] < 30 else 'warn'}'>{h['hiccups']}</b><span>OANDA hiccups last hour (auto-retried)</span></div>"
-        f"<div class='stat'><b class='{'good' if h['tg_err'] == 0 else 'bad'}'>{'OK' if h['tg_err'] == 0 else h['tg_err']}</b>"
-        f"<span>Telegram{'' if h['tg_err'] == 0 else ' errors'}</span></div></div>"
-        f"<div class='sub' style='margin-top:8px'>Last heartbeat {esc(h['heartbeat'] or 'none yet')} · "
-        f"risk {esc(st.get('risk', '—'))}% on {money(st.get('account', acc))} · min reward:risk {esc(st.get('min_rr', '—'))}</div>"
-        "</section>")
+    o.append("<section id='health' class='card glass' style='margin-top:14px'><h2>Bot health</h2>"
+             f"<div class='sub'>Last heartbeat {esc(h['heartbeat'] or 'none yet')} · risk {esc(st.get('risk', '—'))}% "
+             f"per trade · min reward:risk {esc(st.get('min_rr', '—'))}</div><div class='hgrid'>"
+             f"<div><b class='{'' if age is not None and age <= 3 else 'warnline'}'>{esc(ago(h['last'], now))}</b><span>last check</span></div>"
+             f"<div><b class='{'' if h['runs'] >= 50 else 'warnline'}'>{h['runs']} / 60</b><span>checks last hour</span></div>"
+             f"<div><b>{h['hiccups']}</b><span>OANDA hiccups (auto-retried)</span></div>"
+             f"<div><b class='{'' if h['tg_err'] == 0 else 'warnline'}'>{'OK' if h['tg_err'] == 0 else h['tg_err']}</b>"
+             f"<span>Telegram</span></div></div></section>")
 
-    return PAGE.replace("{{CSS}}", CSS).replace("{{BODY}}", "".join(parts))
+    o.append("<nav class='nav glass'><a href='#overview' class='on'>Overview</a><a href='#pairs'>Pairs</a>"
+             "<a href='#alerts'>Alerts</a><a href='#trades'>Trades</a><a href='#health'>Health</a></nav>")
+    return PAGE.replace("{{CSS}}", CSS).replace("{{BODY}}", "".join(o))
 
 
 def _trade_form(ch):
     nowl = datetime.now(LAGOS).strftime("%Y-%m-%dT%H:%M")
     rows = "".join(
         f"<tr><td>{esc(lagos(parse_t(x['t']), '%d %b %H:%M'))}</td><td>{esc(x['pair'])} {esc(x.get('side', ''))}"
-        f"{'<br><span class=sub>' + esc(x['note']) + '</span>' if x.get('note') else ''}</td>"
-        f"<td class='num {'good' if x['pnl'] > 0 else 'bad'}'>{money(x['pnl'], True)}</td>"
-        f"<td class='num'><button class='ghost' onclick=\"act({{action:'delete',id:'{esc(x['id'])}'}},'Remove this trade?')\">✕</button></td></tr>"
+        f"{'<div class=sub>' + esc(x['note']) + '</div>' if x.get('note') else ''}</td>"
+        f"<td class='num {'' if x['pnl'] > 0 else 'neg'}'><b>{money(x['pnl'], True)}</b></td>"
+        f"<td class='num'><button class='ghost' aria-label='Remove trade' "
+        f"onclick=\"act({{action:'delete',id:'{esc(x['id'])}'}},'Remove this trade?')\">✕</button></td></tr>"
         for x in reversed(ch["trades"]))
-    table = (f"<table style='margin-top:12px'><tr><th>Closed (Lagos)</th><th>Trade</th><th class='num'>P/L</th><th></th></tr>"
-             f"{rows}</table>") if rows else "<div class='sub' style='margin-top:10px'>No trades entered yet.</div>"
     nxt = {1: (2, "I passed Phase 1 → track Phase 2"), 2: (3, "I'm funded → track funded account"),
            3: (1, "Start a new challenge")}[ch["phase"]]
     return (
-        "<details style='margin-top:12px' open><summary>Add a closed trade from MT5</summary>"
         "<form id='tf' onsubmit='addTrade(event)'>"
-        f"<select name='pair'>{''.join(f'<option>{p}</option>' for p in PAIRS + ['Other'])}</select>"
-        "<select name='side'><option>Sell</option><option>Buy</option></select>"
-        "<input name='pnl' inputmode='decimal' placeholder='P/L $, e.g. -29.80' required>"
-        f"<input name='closed' type='datetime-local' value='{nowl}'>"
-        "<input name='note' maxlength='120' placeholder='Note (optional)'>"
-        "<button>Add trade</button></form><div id='msg' class='msg'></div></details>"
-        + table +
-        f"<div style='margin-top:12px'><button class='ghost' onclick=\"act({{action:'phase',phase:{nxt[0]}}},"
-        f"'This archives the current trades. Continue?')\">{esc(nxt[1])}</button></div>")
+        f"<select name='pair' aria-label='Pair'>{''.join(f'<option>{p}</option>' for p in PAIRS + ['Other'])}</select>"
+        "<select name='side' aria-label='Side'><option>Sell</option><option>Buy</option></select>"
+        "<input name='pnl' inputmode='decimal' placeholder='P/L $, e.g. -29.80' required aria-label='Profit or loss'>"
+        f"<input name='closed' type='datetime-local' value='{nowl}' aria-label='Closed at'>"
+        "<input name='note' maxlength='120' placeholder='Note (optional)' aria-label='Note'>"
+        "<button>Add trade</button></form><div id='msg' class='msg'></div>"
+        + ((f"<table><tr><th>Closed (Lagos)</th><th>Trade</th><th class='num'>P/L</th><th></th></tr>{rows}</table>")
+           if rows else "<div class='sub'>No trades entered yet.</div>")
+        + f"<div style='margin-top:12px'><button class='ghost' onclick=\"act({{action:'phase',phase:{nxt[0]}}},"
+          f"'This archives the current trades. Continue?')\">{esc(nxt[1])}</button></div>")
 
 
 PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow"><title>Fib Bot</title>
-<style>{{CSS}}</style></head><body><main>{{BODY}}</main>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow"><meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><title>Fib Bot</title>
+<style>{{CSS}}</style></head><body><div class="bg"></div><main>{{BODY}}</main>
 <script>
+async function post(body){
+  const r = await fetch('api', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  return r.json().catch(()=>({ok:false,msg:'Server error'}));
+}
 async function act(body, ask){
   if(ask && !confirm(ask)) return;
-  const r = await fetch('api', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  const j = await r.json().catch(()=>({ok:false,msg:'Server error'}));
+  const j = await post(body);
   if(j.ok) location.reload(); else alert(j.msg || 'Failed');
 }
 async function addTrade(e){
@@ -508,10 +594,15 @@ async function addTrade(e){
   const f = new FormData(e.target), body = {action:'add'};
   f.forEach((v,k)=>body[k]=v);
   body.pnl = String(body.pnl).replace(/[$,\\s]/g,'').replace('\\u2212','-');
-  const r = await fetch('api', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  const j = await r.json().catch(()=>({ok:false,msg:'Server error'}));
+  const j = await post(body);
   if(j.ok) location.reload(); else document.getElementById('msg').textContent = j.msg;
 }
+const links = [...document.querySelectorAll('.nav a')];
+const secs = links.map(a => document.querySelector(a.getAttribute('href')));
+addEventListener('scroll', () => {
+  let i = 0; secs.forEach((s, k) => { if (s && s.getBoundingClientRect().top < innerHeight * 0.4) i = k; });
+  links.forEach((a, k) => a.classList.toggle('on', k === i));
+}, {passive:true});
 setInterval(()=>{
   const a = document.activeElement, f = document.getElementById('tf');
   const typing = a && ['INPUT','SELECT'].includes(a.tagName);
