@@ -560,17 +560,18 @@ def render(now=None):
              f"<span>Telegram</span></div></div>"
              "<div class='bgctl'><label class='status'>Change background"
              "<input type='file' accept='image/*' id='bgfile' hidden onchange='setBg(this)'></label>"
-             + ("<button class='ghost' onclick=\"act({action:'bg_remove'},'Remove your background photo?')\">"
-                "Remove background</button>" if os.path.exists(BG_FILE) else "")
+             + ("<button class='ghost' onclick=\"act({action:'bg_remove'},'Go back to the silver background?')\">"
+                "Back to silver background</button>" if os.path.exists(BG_FILE) else "")
              + "<span id='bgmsg' class='sub'></span></div></section>")
 
     o.append("<nav class='nav glass'><a href='#overview' class='on'>Overview</a><a href='#pairs'>Pairs</a>"
              "<a href='#alerts'>Alerts</a><a href='#trades'>Trades</a><a href='#health'>Health</a></nav>")
-    if os.path.exists(BG_FILE):
+    if os.path.exists(BG_FILE):          # your own picture
         v = int(os.path.getmtime(BG_FILE))
-        bodyclass, bgdiv = " class='photo'", f"<div class='bg' style=\"background-image:url('bg?v={v}')\"></div>"
-    else:
-        bodyclass, bgdiv = "", ""
+        url = f"bg?v={v}"
+    else:                                # default: the soft silver room
+        url = "bg-default.jpg"
+    bodyclass, bgdiv = " class='photo'", f"<div class='bg' style=\"background-image:url('{url}')\"></div>"
     return (PAGE.replace("{{CSS}}", CSS).replace("{{BODYCLASS}}", bodyclass)
             .replace("{{BGDIV}}", bgdiv).replace("{{BODY}}", "".join(o)))
 
