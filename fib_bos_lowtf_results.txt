@@ -1,0 +1,45 @@
+PURE FIB + BOS on 5m / 15m · run 2026-11-03 07:18 UTC
+  XAU/USD 5m: 839168 candles 2015-01-01 -> 2026-11-03 (97s)
+  EUR/USD 5m: 881641 candles 2015-01-01 -> 2026-11-03 (118s)
+  USD/JPY 5m: 882049 candles 2015-01-01 -> 2026-11-03 (115s)
+  EUR/JPY 5m: 882196 candles 2015-01-01 -> 2026-11-03 (111s)
+  XAU/USD 15m: 279857 candles 2015-01-01 -> 2026-11-03 (40s)
+  EUR/USD 15m: 294445 candles 2015-01-01 -> 2026-11-03 (37s)
+  USD/JPY 15m: 294465 candles 2015-01-01 -> 2026-11-03 (38s)
+  EUR/JPY 15m: 294413 candles 2015-01-01 -> 2026-11-03 (28s)
+
+  tf   fib     entry   trades  /mo   win%  IS avg  OOS avg   OOS R    PF  maxDD  no-cost avg  cost/trade
+  --------------------------------------------------------------------------------------------------------
+  5m   extend  0.382    72458   503  47.1  -0.185   -0.145    -4189  0.73   4189     -0.039      0.15R
+  5m   extend  0.5      70911   492  39.6  -0.206   -0.160    -4541  0.73   4541     -0.031      0.17R
+  5m   extend  0.618    71293   495  31.7  -0.247   -0.201    -5745  0.71   5749     -0.035      0.21R
+  5m   fixed   0.382    88606   615  46.9  -0.216   -0.181    -6405  0.66   6406     -0.045      0.18R
+  5m   fixed   0.5      83778   581  39.5  -0.245   -0.202    -6758  0.67   6759     -0.036      0.21R
+  5m   fixed   0.618    79928   555  31.3  -0.302   -0.245    -7840  0.64   7842     -0.048      0.25R
+  15m  extend  0.382    26370   183  48.0  -0.114   -0.082     -862  0.84    866     -0.016      0.09R
+  15m  extend  0.5      25670   178  39.9  -0.131   -0.109    -1120  0.82   1128     -0.020      0.11R
+  15m  extend  0.618    25362   176  32.1  -0.164   -0.121    -1225  0.82   1240     -0.017      0.14R
+  15m  fixed   0.382    30084   209  47.4  -0.144   -0.109    -1306  0.79   1315     -0.028      0.11R
+  15m  fixed   0.5      28605   199  39.8  -0.166   -0.122    -1397  0.80   1413     -0.023      0.14R
+  15m  fixed   0.618    27294   189  31.9  -0.202   -0.149    -1631  0.78   1637     -0.025      0.17R
+
+  OUT-OF-SAMPLE BY PAIR (avg R per trade)
+  5m   extend  0.382  XAUUSD -0.10(6984)  EURUSD -0.18(7213)  USDJPY -0.15(7433)  EURJPY -0.15(7354)
+  5m   extend  0.5    XAUUSD -0.11(6842)  EURUSD -0.18(7101)  USDJPY -0.17(7261)  EURJPY -0.17(7161)
+  5m   extend  0.618  XAUUSD -0.14(6790)  EURUSD -0.23(7155)  USDJPY -0.22(7338)  EURJPY -0.22(7235)
+  5m   fixed   0.382  XAUUSD -0.13(8519)  EURUSD -0.21(9017)  USDJPY -0.19(8916)  EURJPY -0.19(8991)
+  5m   fixed   0.5    XAUUSD -0.15(8081)  EURUSD -0.22(8464)  USDJPY -0.22(8481)  EURJPY -0.21(8486)
+  5m   fixed   0.618  XAUUSD -0.19(7674)  EURUSD -0.27(8114)  USDJPY -0.26(8084)  EURJPY -0.26(8100)
+  15m  extend  0.382  XAUUSD -0.05(2495)  EURUSD -0.10(2608)  USDJPY -0.09(2762)  EURJPY -0.09(2683)
+  15m  extend  0.5    XAUUSD -0.08(2481)  EURUSD -0.14(2619)  USDJPY -0.10(2591)  EURJPY -0.11(2577)
+  15m  extend  0.618  XAUUSD -0.06(2434)  EURUSD -0.16(2573)  USDJPY -0.13(2580)  EURJPY -0.12(2558)
+  15m  fixed   0.382  XAUUSD -0.09(2879)  EURUSD -0.12(3052)  USDJPY -0.11(3060)  EURJPY -0.11(3043)
+  15m  fixed   0.5    XAUUSD -0.07(2764)  EURUSD -0.14(2902)  USDJPY -0.14(2891)  EURJPY -0.14(2885)
+  15m  fixed   0.618  XAUUSD -0.09(2633)  EURUSD -0.16(2777)  USDJPY -0.18(2764)  EURJPY -0.16(2744)
+
+  VERDICT
+  combinations tested           : 12
+  positive out-of-sample        : 0
+  positive before costs (all)   : 0
+  positive in BOTH halves, 100+ : 0
+  -> no version has an edge in both halves after costs.
