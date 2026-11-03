@@ -31,6 +31,7 @@ closed (no peeking).
 """
 
 import gc
+import traceback
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -89,7 +90,7 @@ def manage(d, raw, sl, tp1, tp2, k, market, D, cost, sym):
     if B.in_blackout(when):
         return None
     entry = raw + d * cost
-    if not (d * (entry - sl) > 0 and d * (tp1 - entry) > 0):
+    if not (d * (raw - sl) > 0 and d * (tp1 - entry) > 0):
         return None
     risk = abs(entry - sl)
 
@@ -313,7 +314,11 @@ def main():
             out(f"  {sym}: no data")
             continue
         for grp, name, spec in V:
-            results[(grp, name)] += simulate(P, spec, B.COST[sym], sym)
+            try:
+                results[(grp, name)] += simulate(P, spec, B.COST[sym], sym)
+            except Exception:
+                out(f"  ERROR {sym} {grp} {name}: " + traceback.format_exc().strip().splitlines()[-1])
+                out("    " + " | ".join(traceback.format_exc().strip().splitlines()[-4:-1]))
         a, b = P["span"]
         out(f"  {sym}: {P['n5']} 5m + {P['n15']} 15m candles {datetime.utcfromtimestamp(a).date()} -> "
             f"{datetime.utcfromtimestamp(b).date()} ({time.time() - t0:.0f}s)")

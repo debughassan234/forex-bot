@@ -16,7 +16,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install requests
-      - run: python fib_bos_mtf.py
+      - run: python fib_bos_mtf.py 2>&1 | tee /tmp/run_log.txt; exit ${PIPESTATUS[0]}
+        shell: bash
         env:
           OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -24,8 +25,8 @@ jobs:
       - name: Save results
         if: always()
         run: |
-          [ -f fib_bos_mtf_results.txt ] || exit 0
-          cp fib_bos_mtf_results.txt /tmp/results.txt
+          [ -f fib_bos_mtf_results.txt ] || [ -f /tmp/run_log.txt ] || exit 0
+          cp fib_bos_mtf_results.txt /tmp/results.txt 2>/dev/null || tail -60 /tmp/run_log.txt > /tmp/results.txt
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
           git checkout --orphan mtf-results
