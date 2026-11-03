@@ -1,0 +1,36 @@
+name: Backtest - fib + BOS with 15m and 5m together
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python fib_bos_mtf.py
+        env:
+          OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - name: Save results
+        if: always()
+        run: |
+          [ -f fib_bos_mtf_results.txt ] || exit 0
+          cp fib_bos_mtf_results.txt /tmp/results.txt
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git checkout --orphan mtf-results
+          git rm -rq --cached . >/dev/null 2>&1 || true
+          cp /tmp/results.txt fib_bos_mtf_results.txt
+          git add fib_bos_mtf_results.txt
+          git commit -qm "15m + 5m results"
+          git push -f origin mtf-results
